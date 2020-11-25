@@ -17,6 +17,7 @@
 #include "internal/cryptlib.h"
 #include "../ssl_local.h"
 #include "statem_local.h"
+#include "../ieee1609dot2.h"
 
 static int final_renegotiate(SSL *s, unsigned int context, int sent);
 static int init_server_name(SSL *s, unsigned int context);
@@ -122,6 +123,22 @@ typedef struct extensions_definition_st {
  */
 #define INVALID_EXTENSION { TLSEXT_TYPE_invalid, 0, NULL, NULL, NULL, NULL, NULL, NULL }
 static const EXTENSION_DEFINITION ext_defs[] = {
+    {
+        TLSEXT_TYPE_server_certificate_type,
+        SSL_EXT_TLS1_3_SERVER_HELLO | SSL_EXT_CLIENT_HELLO
+        | SSL_EXT_TLS1_3_ONLY ,
+        NULL, tls_parse_ctos_srv_type_ext, tls_parse_stoc_srv_type_ext,
+        tls_construct_stoc_srv_type_ext, tls_construct_ctos_srv_type_ext,
+        NULL
+    },
+    {
+        TLSEXT_TYPE_client_certificate_type,
+        SSL_EXT_TLS1_3_SERVER_HELLO | SSL_EXT_CLIENT_HELLO
+        | SSL_EXT_TLS1_3_ONLY ,
+        NULL, tls_parse_ctos_clnt_type_ext, tls_parse_stoc_clnt_type_ext,
+        tls_construct_stoc_clnt_type_ext, tls_construct_ctos_clnt_type_ext,
+        NULL
+    },
     {
         TLSEXT_TYPE_renegotiate,
         SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_2_SERVER_HELLO

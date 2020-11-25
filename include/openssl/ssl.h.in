@@ -2523,6 +2523,17 @@ void SSL_set_allow_early_data_cb(SSL *s,
 /* store the default cipher strings inside the library */
 const char *OSSL_default_cipher_list(void);
 const char *OSSL_default_ciphersuites(void);
+// 1609
+#define SSL_RFC8902_1609 0x01
+// X.509
+#define SSL_RFC8902_X509 0x02
+
+int SSL_use_1609_cert(SSL *s, const unsigned char * data, size_t len, uint64_t psid);
+int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[8], uint64_t psid);
+// support is bitmap of SSL_RFC8902...
+int SSL_enable_RFC8902_support(SSL *s, int server_support, int client_support);
+int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid,
+							   unsigned char hashedid[8]);
 
 # ifdef  __cplusplus
 }

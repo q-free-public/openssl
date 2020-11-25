@@ -742,6 +742,8 @@ typedef struct {
  * with equivalent updates to ext_defs in extensions.c
  */
 typedef enum tlsext_index_en {
+    TLSEXT_IDX_server_certificate_type,
+    TLSEXT_IDX_client_certificate_type,
     TLSEXT_IDX_renegotiate,
     TLSEXT_IDX_server_name,
     TLSEXT_IDX_max_fragment_length,

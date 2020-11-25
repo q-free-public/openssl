@@ -1410,6 +1410,7 @@ SSL_R_MISSING_TMP_DH_KEY:171:missing tmp dh key
 SSL_R_MISSING_TMP_ECDH_KEY:311:missing tmp ecdh key
 SSL_R_MIXED_HANDSHAKE_AND_NON_HANDSHAKE_DATA:293:\
 	mixed handshake and non handshake data
+SSL_R_NOT_1609_CERT:305:not 1609 cert
 SSL_R_NOT_ON_RECORD_BOUNDARY:182:not on record boundary
 SSL_R_NOT_REPLACING_CERTIFICATE:289:not replacing certificate
 SSL_R_NOT_SERVER:284:not server
@@ -1476,12 +1477,15 @@ SSL_R_REQUIRED_COMPRESSION_ALGORITHM_MISSING:342:\
 	required compression algorithm missing
 SSL_R_SCSV_RECEIVED_WHEN_RENEGOTIATING:345:scsv received when renegotiating
 SSL_R_SCT_VERIFICATION_FAILED:208:sct verification failed
+SSL_R_SEC_ENT_CONNECT_FAILED:295:sec ent connect failed
 SSL_R_SERVERHELLO_TLSEXT:275:serverhello tlsext
 SSL_R_SESSION_ID_CONTEXT_UNINITIALIZED:277:session id context uninitialized
 SSL_R_SHUTDOWN_WHILE_IN_INIT:407:shutdown while in init
 SSL_R_SIGNATURE_ALGORITHMS_ERROR:360:signature algorithms error
 SSL_R_SIGNATURE_FOR_NON_SIGNING_CERTIFICATE:220:\
 	signature for non signing certificate
+SSL_R_SOCKET_ALLOC_FAILED:296:socket alloc failed
+SSL_R_SOCKET_ALREADY_INITIALIZED:294:socket already initialized
 SSL_R_SRP_A_CALC:361:error with the srp params
 SSL_R_SRTP_COULD_NOT_ALLOCATE_PROFILES:362:srtp could not allocate profiles
 SSL_R_SRTP_PROTECTION_PROFILE_LIST_TOO_LONG:363:\
@@ -1538,9 +1542,11 @@ SSL_R_UNKNOWN_STATE:255:unknown state
 SSL_R_UNSAFE_LEGACY_RENEGOTIATION_DISABLED:338:\
 	unsafe legacy renegotiation disabled
 SSL_R_UNSOLICITED_EXTENSION:217:unsolicited extension
+SSL_R_UNSUPPORTED_CERT_TYPE:299:unsupported cert type
 SSL_R_UNSUPPORTED_COMPRESSION_ALGORITHM:257:unsupported compression algorithm
 SSL_R_UNSUPPORTED_ELLIPTIC_CURVE:315:unsupported elliptic curve
 SSL_R_UNSUPPORTED_PROTOCOL:258:unsupported protocol
+SSL_R_UNSUPPORTED_SRV_CERT_TYPE:297:unsupported srv cert type
 SSL_R_UNSUPPORTED_SSL_VERSION:259:unsupported ssl version
 SSL_R_UNSUPPORTED_STATUS_TYPE:329:unsupported status type
 SSL_R_USE_SRTP_NOT_NEGOTIATED:369:use srtp not negotiated

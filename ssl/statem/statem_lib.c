@@ -20,6 +20,7 @@
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
 #include <openssl/trace.h>
+#include "../ieee1609dot2.h"
 
 /*
  * Map error codes to TLS/SSL alart types.
@@ -276,10 +277,28 @@ int tls_construct_cert_verify(SSL *s, WPACKET *pkt)
     unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     const SIGALG_LOOKUP *lu = s->s3.tmp.sigalg;
 
+    fprintf(stderr, "server: %d tls_construct_cert_verify\n", SSL_is_server(s));
+
     if (lu == NULL || s->s3.tmp.cert == NULL) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
     }
+
+    /* Get the data to be signed */
+    if (!get_cert_verify_tbs_data(s, tls13tbs, &hdata, &hdatalen)) {
+        /* SSLfatal() already called */
+        goto err;
+    }
+
+    if (SSL_is_using_1609_this_side(s)) {
+        if (!tls_construct_IEEE1609_CERT_cert_verify(s, pkt,
+            s->s3.tmp.cert->x509, hdata, hdatalen)) {
+                /* SSLfatal() already called */
+                goto err;
+            }
+            goto ret;
+    }
+
     pkey = s->s3.tmp.cert->privatekey;
 
     if (pkey == NULL || !tls1_lookup_md(s->ctx, lu, &md)) {
@@ -290,12 +309,6 @@ int tls_construct_cert_verify(SSL *s, WPACKET *pkt)
     mctx = EVP_MD_CTX_new();
     if (mctx == NULL) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_MALLOC_FAILURE);
-        goto err;
-    }
-
-    /* Get the data to be signed */
-    if (!get_cert_verify_tbs_data(s, tls13tbs, &hdata, &hdatalen)) {
-        /* SSLfatal() already called */
         goto err;
     }
 
@@ -379,6 +392,7 @@ int tls_construct_cert_verify(SSL *s, WPACKET *pkt)
         goto err;
     }
 
+ret:
     OPENSSL_free(sig);
     EVP_MD_CTX_free(mctx);
     return 1;
@@ -412,6 +426,33 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL *s, PACKET *pkt)
     }
 
     peer = s->session->peer;
+
+    // if the other side is using 1609
+    // TODO: is this flow correct for 1609.2 ?
+    if (SSL_is_using_1609_other_side(s)) {
+
+        if (!IEEE1609_CERT_verify(peer)) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+            goto err;
+        }
+        len = (int)PACKET_remaining(pkt);
+        if (!PACKET_get_bytes(pkt, &data, len)) {
+            SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_LENGTH_MISMATCH);
+            goto err;
+        }
+
+        if (!get_cert_verify_tbs_data(s, tls13tbs, &hdata, &hdatalen)) {
+            /* SSLfatal() already called */
+            goto err;
+        }
+
+        if (!tls_process_IEEE1609_CERT_cert_verify(s, peer,
+                hdata, hdatalen, data, len)) {
+            /* SSLfatal() already called */
+            goto err;
+        }
+        goto ret;
+    }
     pkey = X509_get0_pubkey(peer);
     if (pkey == NULL) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
@@ -534,6 +575,7 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL *s, PACKET *pkt)
         }
     }
 
+ret:
     /*
      * In TLSv1.3 on the client side we make sure we prepare the client
      * certificate after the CertVerify instead of when we get the
@@ -893,6 +935,13 @@ static int ssl_add_cert_to_wpacket(SSL *s, WPACKET *pkt, X509 *x, int chain)
     int len;
     unsigned char *outbytes;
 
+    // check if we're using 1609 certs
+    fprintf(stderr, "server %d using_1609 %d\n", SSL_is_server(s), SSL_is_using_1609_this_side(s));
+    if (SSL_is_using_1609_this_side(s)) {
+        return ssl_add_IEEE1609_CERT_to_wpacket(s, pkt, x, chain);
+        /* SSLfatal() already called */
+    }
+
     len = i2d_X509(x, NULL);
     if (len < 0) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_BUF_LIB);
@@ -917,14 +966,25 @@ static int ssl_add_cert_to_wpacket(SSL *s, WPACKET *pkt, X509 *x, int chain)
 /* Add certificate chain to provided WPACKET */
 static int ssl_add_cert_chain(SSL *s, WPACKET *pkt, CERT_PKEY *cpk)
 {
+    // here certs are added to the packet!
+    fprintf(stderr, "server: %d ssl_add_cert_chain\n", SSL_is_server(s));
     int i, chain_count;
     X509 *x;
     STACK_OF(X509) *extra_certs;
     STACK_OF(X509) *chain = NULL;
     X509_STORE *chain_store;
 
-    if (cpk == NULL || cpk->x509 == NULL)
+    if (cpk == NULL || cpk->x509 == NULL) {
+        // if no cpk we can still use the cert to send
+        if (SSL_is_using_1609_this_side(s)) {
+            x = SSL_get_certificate(s);
+            if (!ssl_add_cert_to_wpacket(s, pkt, x, 0)) {
+                /* SSLfatal() already called */
+                return 0;
+            }
+        }
         return 1;
+    }
 
     x = cpk->x509;
 

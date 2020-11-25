@@ -24,6 +24,7 @@
 #include "ssl_local.h"
 #include "ssl_cert_table.h"
 #include "internal/thread_once.h"
+#include "ieee1609dot2.h"
 #ifndef OPENSSL_NO_POSIX_IO
 # include <sys/stat.h>
 # ifdef _WIN32
@@ -402,6 +403,14 @@ int ssl_verify_cert_chain(SSL *s, STACK_OF(X509) *sk)
     }
 
     x = sk_X509_value(sk, 0);
+    if (X509_is_IEEE1609_CERT(x)) {
+        //TODO: maybe call verification on a chain in a proper way - not just first cert?
+        i = IEEE1609_CERT_verify(x);
+        if (!i) {
+        	SSLerr(SSL_F_SSL_VERIFY_CERT_CHAIN, ERR_R_INTERNAL_ERROR);
+        }
+        goto end;
+    }
     if (!X509_STORE_CTX_init(ctx, verify_store, x, sk)) {
         ERR_raise(ERR_LIB_SSL, ERR_R_X509_LIB);
         goto end;

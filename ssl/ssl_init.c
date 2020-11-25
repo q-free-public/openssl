@@ -16,6 +16,7 @@
 #include "ssl_local.h"
 #include "sslerr.h"
 #include "internal/thread_once.h"
+#include "ieee1609dot2.h"
 
 static int stopped;
 
@@ -60,6 +61,15 @@ DEFINE_RUN_ONCE_STATIC(ossl_init_load_ssl_strings)
     return 1;
 }
 
+static CRYPTO_ONCE ssl_IEEE1609 = CRYPTO_ONCE_STATIC_INIT;
+static int ssl_IEEE1609_inited = 0;
+DEFINE_RUN_ONCE_STATIC(ossl_init_IEEE1609)
+{
+    IEEE1609_TLS_init();
+    ssl_IEEE1609_inited = 1;
+    return 1;
+}
+
 DEFINE_RUN_ONCE_STATIC_ALT(ossl_init_no_load_ssl_strings,
                            ossl_init_load_ssl_strings)
 {
@@ -80,6 +90,10 @@ static void ssl_library_stop(void)
                    "ssl_comp_free_compression_methods_int()\n");
         ssl_comp_free_compression_methods_int();
 #endif
+    }
+
+    if (ssl_IEEE1609_inited) {
+        IEEE1609_TLS_free();
     }
 }
 
@@ -126,6 +140,10 @@ int OPENSSL_init_ssl(uint64_t opts, const OPENSSL_INIT_SETTINGS * settings)
     if ((opts & OPENSSL_INIT_LOAD_SSL_STRINGS)
         && !RUN_ONCE(&ssl_strings, ossl_init_load_ssl_strings))
         return 0;
+
+    if (!RUN_ONCE(&ssl_IEEE1609, ossl_init_IEEE1609)) {
+        return 0;
+    }
 
     return 1;
 }

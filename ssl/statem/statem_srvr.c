@@ -26,6 +26,7 @@
 #include <openssl/trace.h>
 #include <openssl/core_names.h>
 #include <openssl/asn1t.h>
+#include "../ieee1609dot2.h"
 
 #define TICKET_NONCE_SIZE       8
 
@@ -3460,7 +3461,14 @@ MSG_PROCESS_RETURN tls_process_client_certificate(SSL *s, PACKET *pkt)
             SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_MALLOC_FAILURE);
             goto err;
         }
-        if (d2i_X509(&x, (const unsigned char **)&certbytes, l) == NULL) {
+
+        if (SSL_is_using_1609_client(s)) {
+            x = X509_new_IEEE1609_CERT((const unsigned char **)&certbytes, l);
+        } else {
+            d2i_X509(&x, (const unsigned char **)&certbytes, l);
+        }
+
+        if (x == NULL) {
             SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_ASN1_LIB);
             goto err;
         }
@@ -3524,11 +3532,19 @@ MSG_PROCESS_RETURN tls_process_client_certificate(SSL *s, PACKET *pkt)
                      SSL_R_CERTIFICATE_VERIFY_FAILED);
             goto err;
         }
-        pkey = X509_get0_pubkey(sk_X509_value(sk, 0));
-        if (pkey == NULL) {
-            SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE,
-                     SSL_R_UNKNOWN_CERTIFICATE_TYPE);
-            goto err;
+        // if (i > 1) {
+        //     SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE,
+        //              SSL_F_TLS_PROCESS_CLIENT_CERTIFICATE, i);
+        //     goto err;
+        // }
+        if (!X509_is_IEEE1609_CERT(sk_X509_value(sk, 0))) {
+            // TODO: this maybe can be removed?
+            // TODO: why is this check here? - are we using this pkey somewhere later?
+            pkey = X509_get0_pubkey(sk_X509_value(sk, 0));
+            if (pkey == NULL) {
+                SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
+                    goto err;
+                }
         }
     }
 

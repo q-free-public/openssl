@@ -27,6 +27,7 @@
 #include <openssl/core_names.h>
 #include <openssl/param_build.h>
 #include "internal/cryptlib.h"
+#include "../ieee1609dot2.h"
 
 static MSG_PROCESS_RETURN tls_process_as_hello_retry_request(SSL *s, PACKET *pkt);
 static MSG_PROCESS_RETURN tls_process_encrypted_extensions(SSL *s, PACKET *pkt);
@@ -1805,8 +1806,12 @@ MSG_PROCESS_RETURN tls_process_server_certificate(SSL *s, PACKET *pkt)
             ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
             goto err;
         }
-        if (d2i_X509(&x, (const unsigned char **)&certbytes,
-                     cert_len) == NULL) {
+        if (SSL_is_using_1609_server(s)) {
+            x = X509_new_IEEE1609_CERT((const unsigned char **)&certbytes, cert_len);
+        } else {
+            d2i_X509(&x, (const unsigned char **)&certbytes, cert_len);
+        }
+        if (x == NULL) {
             SSLfatal(s, SSL_AD_BAD_CERTIFICATE, ERR_R_ASN1_LIB);
             goto err;
         }
@@ -1898,17 +1903,21 @@ WORK_STATE tls_post_process_server_certificate(SSL *s, WORK_STATE wst)
      */
     x = sk_X509_value(s->session->peer_chain, 0);
 
-    pkey = X509_get0_pubkey(x);
+    if (X509_is_IEEE1609_CERT(x)) {
+        //TODO: should something be done here?
+    } else {
+        pkey = X509_get0_pubkey(x);
 
-    if (pkey == NULL || EVP_PKEY_missing_parameters(pkey)) {
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR,
-                 SSL_R_UNABLE_TO_FIND_PUBLIC_KEY_PARAMETERS);
-        return WORK_ERROR;
-    }
+        if (pkey == NULL || EVP_PKEY_missing_parameters(pkey)) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR,
+                    SSL_R_UNABLE_TO_FIND_PUBLIC_KEY_PARAMETERS);
+            return WORK_ERROR;
+        }
 
-    if ((clu = ssl_cert_lookup_by_pkey(pkey, &certidx)) == NULL) {
-        SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
-        return WORK_ERROR;
+        if ((clu = ssl_cert_lookup_by_pkey(pkey, &certidx)) == NULL) {
+            SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
+            return WORK_ERROR;
+        }
     }
     /*
      * Check certificate type is consistent with ciphersuite. For TLS 1.3
