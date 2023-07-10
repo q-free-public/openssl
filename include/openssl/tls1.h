@@ -123,6 +123,13 @@ extern "C" {
 # define TLSEXT_TYPE_signed_certificate_timestamp    18
 
 /*
+ * Extensions used for RFC8902
+ * http://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml 
+ */
+# define TLSEXT_TYPE_client_certificate_type    19
+# define TLSEXT_TYPE_server_certificate_type    20
+
+/*
  * ExtensionType value for TLS padding extension.
  * http://tools.ietf.org/html/draft-agl-tls-padding
  */

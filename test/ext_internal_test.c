@@ -24,7 +24,8 @@ typedef struct {
 
 /* The order here does matter! */
 static EXT_LIST ext_list[] = {
-
+    EXT_ENTRY(server_certificate_type),
+    EXT_ENTRY(client_certificate_type),
     EXT_ENTRY(renegotiate),
     EXT_ENTRY(server_name),
     EXT_ENTRY(max_fragment_length),

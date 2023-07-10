@@ -374,13 +374,6 @@ static int g_ssl_1609_idx = -1;
 #define SEC_ENT_MSG_TYPE_TLS_SIGN_DATA 19
 #define SEC_ENT_MSG_TYPE_TLS_VERIFY_DATA 20
 
-/* Managed by IANA */
- enum CertificateType{
-	 CertificateTypeX509 = 0,
-	 CertificateTypeRawPublicKey = 2,
-	 CertificateType1609Dot2 = 3
- };
-
 struct sec_ent_msg_st {
 // set contents
     uint8_t msg_type;
@@ -397,7 +390,7 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_from_type_allocate(uint8_t msg_type, size_t
 
     msg = OPENSSL_malloc(sizeof(*msg));
     if (msg == NULL) {
-        SSLerr(SSL_F_SEC_ENT_MSG_NEW_FROM_TYPE_ALLOCATE, ERR_R_MALLOC_FAILURE);
+        ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
         return NULL;
     }
     msg->msg_type = msg_type;
@@ -407,7 +400,7 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_from_type_allocate(uint8_t msg_type, size_t
     } else {
         msg->data = OPENSSL_malloc(len);
         if (msg->data == NULL) {
-            SSLerr(SSL_F_SEC_ENT_MSG_NEW_FROM_TYPE_ALLOCATE, ERR_R_MALLOC_FAILURE);
+            ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
             OPENSSL_free(msg);
             return NULL;
         }
@@ -429,7 +422,7 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_from_type_buffer(
     return msg;
 }
 
-void SEC_ENT_MSG_free(SEC_ENT_MSG * msg) {
+static void SEC_ENT_MSG_free(SEC_ENT_MSG * msg) {
     if (msg != NULL){
         if (msg->data != NULL) {
             OPENSSL_free(msg->data);
@@ -445,11 +438,11 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_from_recv_buffer(
 
     msg = OPENSSL_malloc(sizeof(*msg));
     if (msg == NULL) {
-        SSLerr(SSL_F_SEC_ENT_MSG_NEW_FROM_RECV_BUFFER, ERR_R_MALLOC_FAILURE);
+        ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
         return NULL;
     }
     if (len == 0) {
-        SSLerr(SSL_F_SEC_ENT_MSG_NEW_FROM_RECV_BUFFER, SSL_R_BAD_DATA);
+        ERR_raise(ERR_LIB_SSL, SSL_R_BAD_DATA);
         goto err;
     }
     msg->msg_type = data[0];
@@ -460,7 +453,7 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_from_recv_buffer(
     } else {
         msg->data = OPENSSL_malloc(msg->len);
         if (msg->data == NULL) {
-            SSLerr(SSL_F_SEC_ENT_MSG_NEW_FROM_RECV_BUFFER, ERR_R_MALLOC_FAILURE);
+            ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
             goto err;
         }
         memcpy(msg->data, &data[SEC_ENT_MSG_HDR_LEN], msg->len);
@@ -491,7 +484,7 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_TYPE_TLS_SIGN_DATA(
             SEC_ENT_MSG_TYPE_TLS_SIGN_DATA,
             sizeof(uint64_t) + HASHEDID8_LEN + input_len);
     if (msg == NULL) {
-        SSLerr(SSL_F_SEC_ENT_MSG_NEW_TYPE_TLS_SIGN_DATA, ERR_R_MALLOC_FAILURE);
+        ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
         return NULL;
     }
 
@@ -516,7 +509,7 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_TYPE_TLS_VERIFY_DATA(
             SEC_ENT_MSG_TYPE_TLS_VERIFY_DATA,
             HASHEDID8_LEN + verify_data_len + verify_input_len);
     if (msg == NULL) {
-        SSLerr(SSL_F_SEC_ENT_MSG_NEW_TYPE_TLS_VERIFY_DATA, ERR_R_MALLOC_FAILURE);
+        ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
         return NULL;
     }
     unsigned char * msg_pos = msg->data;
@@ -546,13 +539,13 @@ static int SEC_ENT_MSG_get_send_buffer(SEC_ENT_MSG * msg,
         unsigned char ** data, size_t * len)
 {
     if (*data != NULL || msg == NULL) {
-        SSLerr(SSL_F_SEC_ENT_MSG_GET_SEND_BUFFER, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return 0;
     }
     uint32_t msg_len = msg->len;
     unsigned char * msg_buff = OPENSSL_malloc(msg_len + SEC_ENT_MSG_HDR_LEN);
     if (msg_buff == NULL) {
-        SSLerr(SSL_F_SEC_ENT_MSG_GET_SEND_BUFFER, ERR_R_MALLOC_FAILURE);
+        ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
         return 0;
     }
     // set out values;
@@ -569,7 +562,7 @@ static int SEC_ENT_MSG_get_send_buffer(SEC_ENT_MSG * msg,
 
 static void print_buffer(const unsigned char * data, size_t len) {
     fprintf(stderr, ">>> Buffer len[%ld] \n", len);
-    for (int i = 0; i < len; i++) {
+    for (int i = 0; i < (int)len; i++) {
         fprintf(stderr, "%02x ", ((unsigned char *) data)[i]);
         if ((i+1)%20 == 0) {
             fprintf(stderr, "\n");
@@ -578,13 +571,13 @@ static void print_buffer(const unsigned char * data, size_t len) {
     fprintf(stderr, "\n");
 }
 
-static int connect_server() {
+static int connect_server(void) {
     struct sockaddr_in servaddr;
     int sock_fd;
 
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_fd == -1) {
-        SSLerr(SSL_F_CONNECT_SERVER, SSL_R_SOCKET_ALLOC_FAILED);
+        ERR_raise(ERR_LIB_SSL, SSL_R_SOCKET_ALLOC_FAILED);
         return -1;
     }
     bzero(&servaddr, sizeof(servaddr));
@@ -596,7 +589,7 @@ static int connect_server() {
 
     // connect the client socket to server socket
     if (connect(sock_fd, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0) {
-        SSLerr(SSL_F_CONNECT_SERVER, SSL_R_SEC_ENT_CONNECT_FAILED);
+        ERR_raise(ERR_LIB_SSL, SSL_R_SEC_ENT_CONNECT_FAILED);
         return -1;
     }
 
@@ -610,21 +603,25 @@ static SEC_ENT_MSG * send_recv_server(int sock_fd,
     unsigned char buff[2048];
     SEC_ENT_MSG * reply = NULL;
 
+    if (0) {
+        print_buffer(buff, 0);
+    }
+
 #ifdef TLS_13_1609_DEBUG
     fprintf(">>> send_recv_server - request\n");
     print_buffer(out_data, out_len);
 #endif
     int write_len = write(sock_fd, out_data, out_len);
-    if (write_len != out_len) {
-        SSLerr(SSL_F_SEND_RECV_SERVER, ERR_R_INTERNAL_ERROR);
+    if (write_len != (int)out_len) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return NULL;
     }
 
     bzero(buff, sizeof(buff));
     int read_len = read(sock_fd, buff, sizeof(buff));
-    if (read_len > sizeof(buff)) {
+    if (read_len > (int)sizeof(buff)) {
         // TODO: this may be handled in the future
-        SSLerr(SSL_F_SEND_RECV_SERVER, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return NULL;
     }
 #ifdef TLS_13_1609_DEBUG
@@ -633,11 +630,11 @@ static SEC_ENT_MSG * send_recv_server(int sock_fd,
 #endif
     reply = SEC_ENT_MSG_new_from_recv_buffer(buff, read_len);
     if (reply == NULL) {
-        SSLerr(SSL_F_SEND_RECV_SERVER, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return NULL;
     }
     if (reply->msg_type == SEC_ENT_MSG_TYPE_FAILURE) {
-        SSLerr(SSL_F_SEND_RECV_SERVER, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         ERR_add_error_data(1, reply->data);
         SEC_ENT_MSG_free(reply);
         return NULL;
@@ -660,16 +657,16 @@ static SEC_ENT_MSG * sec_ent_process(SEC_ENT_MSG * msg) {
 
     sock_fd = connect_server();
     if (sock_fd < 0) {
-        SSLerr(SSL_F_SEC_ENT_PROCESS, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return NULL;
     }
     if (!SEC_ENT_MSG_get_send_buffer(msg, &msg_buff, &len)) {
-        SSLerr(SSL_F_SEC_ENT_PROCESS, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         goto out;
     }
     ret = send_recv_server(sock_fd, msg_buff, len, NULL, NULL);
     if (ret == NULL) {
-        SSLerr(SSL_F_SEC_ENT_PROCESS, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         goto out;
     }
 
@@ -689,12 +686,12 @@ struct IEEE1609_cert_st {
 
 typedef struct IEEE1609_cert_st IEEE1609_CERT;
 
-IEEE1609_CERT * IEEE1609_CERT_new_from_buffer(const unsigned char ** data, long len) {
+static IEEE1609_CERT * IEEE1609_CERT_new_from_buffer(const unsigned char ** data, long len) {
     IEEE1609_CERT * cert = NULL;
 
     cert = OPENSSL_malloc(sizeof(*cert));
     if (cert == NULL) {
-        SSLerr(SSL_F_IEEE1609_CERT_NEW_FROM_BUFFER, ERR_R_MALLOC_FAILURE);
+        ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
         return NULL;
     }
     cert->version = _1609DOT2_VSN;
@@ -703,7 +700,7 @@ IEEE1609_CERT * IEEE1609_CERT_new_from_buffer(const unsigned char ** data, long 
     bzero(cert->hashedid8, sizeof(cert->hashedid8));
     cert->cert_data = OPENSSL_malloc(len);
     if (cert->cert_data == NULL) {
-        SSLerr(SSL_F_IEEE1609_CERT_NEW_FROM_BUFFER, ERR_R_MALLOC_FAILURE);
+        ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
         OPENSSL_free(cert);
         return NULL;
     }
@@ -713,18 +710,18 @@ IEEE1609_CERT * IEEE1609_CERT_new_from_buffer(const unsigned char ** data, long 
     return cert;
 }
 
-IEEE1609_CERT * IEEE1609_CERT_dup(IEEE1609_CERT * cert) {
+static IEEE1609_CERT * IEEE1609_CERT_dup(IEEE1609_CERT * cert) {
     IEEE1609_CERT * ret = NULL;
 
     if (cert != NULL) {
         ret = OPENSSL_memdup(cert, sizeof(*cert));
         if (ret == NULL) {
-            SSLerr(SSL_F_IEEE1609_CERT_DUP, ERR_R_MALLOC_FAILURE);
+            ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
             return NULL;
         }
         ret->cert_data = OPENSSL_memdup(ret->cert_data, ret->cert_data_len);
         if (ret == NULL) {
-            SSLerr(SSL_F_IEEE1609_CERT_DUP, ERR_R_MALLOC_FAILURE);
+            ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
             OPENSSL_free(ret);
             return NULL;
         }
@@ -733,7 +730,7 @@ IEEE1609_CERT * IEEE1609_CERT_dup(IEEE1609_CERT * cert) {
     return ret;
 }
 
-void IEEE1609_CERT_free(IEEE1609_CERT * cert) {
+static void IEEE1609_CERT_free(IEEE1609_CERT * cert) {
     if (cert != NULL) {
         if (cert->cert_data != NULL) {
             OPENSSL_free(cert->cert_data);
@@ -742,7 +739,7 @@ void IEEE1609_CERT_free(IEEE1609_CERT * cert) {
     }
 }
 
-IEEE1609_CERT * IEEE1609_CERT_from_X509(X509 * x) {
+static IEEE1609_CERT * IEEE1609_CERT_from_X509(X509 * x) {
     return X509_get_ex_data(x, g_x509_1609_idx);
 }
 
@@ -772,16 +769,6 @@ static int CRYPTO_EX_IEEE1609_CERT_dup(CRYPTO_EX_DATA *to, const CRYPTO_EX_DATA 
     return 1;
 }
 
-struct RFC8902_cert_type_st {
-    // do we allow 1609 or X509 certs on this side?
-    int support;
-    // cert type decided to use based on server_cert_type extension
-    // -1 in case of no decision
-    int type_decided;
-};
-
-typedef struct RFC8902_cert_type_st RFC8902_CERT_TYPE;
-
 struct ssl_IEEE1609_st {
     // do we want to allow cert_type extensions?
     int RFC8902_support;
@@ -796,7 +783,7 @@ struct ssl_IEEE1609_st {
 
 typedef struct ssl_IEEE1609_st SSL_IEEE1609;
 
-SSL_IEEE1609 * SSL_get_SSL_IEEE1609(SSL * s) {
+static SSL_IEEE1609 * SSL_get_SSL_IEEE1609(SSL * s) {
     SSL_IEEE1609 * ieee1609_state = NULL;
     ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
     return ieee1609_state;
@@ -811,7 +798,7 @@ RFC8902_CERT_TYPE * SSL_get_RFC8902_CERT_TYPE(SSL * s, int ext_idx) {
     if (ext_idx == TLSEXT_TYPE_client_certificate_type) {
         return &ieee1609_state->clnt;
     }
-    SSLerr(SSL_F_SSL_GET_RFC8902_CERT_TYPE, ERR_R_INTERNAL_ERROR);
+    ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
     return NULL;
 }
 
@@ -887,7 +874,7 @@ int SSL_is_using_1609_other_side(SSL *s)
     }
 }
 
-void IEEE1609_TLS_init() {
+void IEEE1609_TLS_init(void) {
     g_x509_1609_idx = X509_get_ex_new_index(0, NULL,
             CRYPTO_EX_IEEE1609_CERT_new,
             CRYPTO_EX_IEEE1609_CERT_dup,
@@ -898,16 +885,16 @@ void IEEE1609_TLS_init() {
             CRYPTO_EX_SSL_IEEE1609_free);
 }
 
-void IEEE1609_TLS_free() {
+void IEEE1609_TLS_free(void) {
 }
 
-static X509 * X509_new_fake_cert() {
+static X509 * X509_new_fake_cert(void) {
     X509 * cert = NULL;
 	const unsigned char *p = X509_cert_der;
 
 	cert = d2i_X509(NULL, &p, X509_cert_der_len);
 	if (cert == NULL) {
-        SSLerr(SSL_F_X509_NEW_FAKE_CERT, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return NULL;
 	}
     return cert;
@@ -928,23 +915,23 @@ X509 * X509_new_IEEE1609_CERT(const unsigned char **ppin, long length) {
     IEEE1609_CERT * cert = NULL;
 
     if (g_x509_1609_idx == -1) {
-        SSLerr(SSL_F_X509_NEW_IEEE1609_CERT, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return NULL;
     }
 
     ret = X509_new_fake_cert();
     if (ret == NULL) {
-        SSLerr(SSL_F_X509_NEW_IEEE1609_CERT, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return NULL;
     }
 
     cert = IEEE1609_CERT_new_from_buffer(ppin, length);
     if (cert == NULL) {
-        SSLerr(SSL_F_X509_NEW_IEEE1609_CERT, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return NULL;
     }
     if (!X509_set_ex_data(ret, g_x509_1609_idx, cert)) {
-        SSLerr(SSL_F_X509_NEW_IEEE1609_CERT, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         IEEE1609_CERT_free(cert);
         return NULL;
     }
@@ -957,19 +944,19 @@ int X509_append_IEEE1609_CERT_test(X509 * x) {
     const unsigned char *certstart = __1609dot2_at_cert;
 
     if (g_x509_1609_idx == -1) {
-        SSLerr(SSL_F_X509_APPEND_IEEE1609_CERT_TEST, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return 0;
     }
 
     cert = IEEE1609_CERT_new_from_buffer(&certstart, __1609dot2_at_cert_len);
     if (cert == NULL) {
-        SSLerr(SSL_F_X509_APPEND_IEEE1609_CERT_TEST, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return 0;
     }
     cert->hashed_id_present = 1;
     memcpy(cert->hashedid8, __1609dot2_at_cert_hash, sizeof(cert->hashedid8));
     if (!X509_set_ex_data(x, g_x509_1609_idx, cert)) {
-        SSLerr(SSL_F_X509_APPEND_IEEE1609_CERT_TEST, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         IEEE1609_CERT_free(cert);
         return 0;
     }
@@ -984,25 +971,25 @@ int IEEE1609_CERT_verify(X509 * x) {
 
     cert = X509_get_ex_data(x, g_x509_1609_idx);
     if (cert == NULL) {
-        SSLerr(SSL_F_IEEE1609_CERT_VERIFY, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         ret = 0;
         goto out;
     }
 
     msg = SEC_ENT_MSG_new_TYPE_TLS_VERIFY_CERTS(cert->cert_data, cert->cert_data_len);
     if (msg == NULL) {
-        SSLerr(SSL_F_IEEE1609_CERT_VERIFY, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         ret = 0;
         goto out;
     }
     reply = sec_ent_process(msg);
     if (reply == NULL) {
-        SSLerr(SSL_F_IEEE1609_CERT_VERIFY, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         ret = 0;
         goto out;
     }
     if (reply->msg_type != SEC_ENT_MSG_TYPE_TLS_VERIFY_CERTS) {
-        SSLerr(SSL_F_IEEE1609_CERT_VERIFY, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         ret = 0;
 #ifdef TLS_13_1609_DEBUG
         fprintf(stderr,
@@ -1203,224 +1190,6 @@ err:
     return 0;
 }
 
-
-/* Parse extension sent from client to server */
-static int tls_parse_ctos_cert_type_ext(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
-                  size_t chainidx, int ext_idx)
-{
-    size_t list_len;
-    RFC8902_CERT_TYPE * cert_type_data;
-
-    if (!SSL_is_RFC8902_supported(s)) {
-        return 0;
-    }
-
-    cert_type_data = SSL_get_RFC8902_CERT_TYPE(s, ext_idx);
-
-    // packet contains array of the supported types
-    if (!PACKET_get_1_len(pkt, &list_len)) {
-        SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_INTERNAL_ERROR);
-        return 0;
-    }
-    /* Consistency check */
-    if (PACKET_remaining(pkt) != list_len) {
-        SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_INTERNAL_ERROR);
-        return 0;
-    }
-
-    // loop through cert types
-    int client_allows_x509 = 0;
-    int client_allows_1609 = 0;
-    for (size_t i = 0; i < list_len; i++) {
-        unsigned int cert_type;
-        if (!PACKET_get_1(pkt, &cert_type)) {
-            SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_INTERNAL_ERROR);
-            return 0;
-        }
-        if (cert_type == CertificateTypeX509) {
-            client_allows_x509 = 1;
-        }
-        if (cert_type == CertificateType1609Dot2) {
-            client_allows_1609 = 1;
-        }
-    }
-    // prefer 1609;
-    if ((cert_type_data->support & SSL_RFC8902_1609) && client_allows_1609) {
-        cert_type_data->type_decided = CertificateType1609Dot2;
-    } else if ((cert_type_data->support & SSL_RFC8902_X509) && client_allows_x509){
-        cert_type_data->type_decided = CertificateTypeX509;
-    } else {
-        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_UNSUPPORTED_CERT_TYPE);
-        return 0;
-    }
-
-    return 1;
-}
-
-/* Parse extension sent from server to client */
-static int tls_parse_stoc_cert_type_ext(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
-                size_t chainidx, int ext_idx)
-{
-    unsigned int cert_type;
-    RFC8902_CERT_TYPE * cert_type_data;
-
-    if (!SSL_is_RFC8902_supported(s)) {
-        return 0;
-    }
-
-    cert_type_data = SSL_get_RFC8902_CERT_TYPE(s, ext_idx);
-
-    // packet contains single chosen type
-    /* Consistency check */
-    if (PACKET_remaining(pkt) != 1) {
-        SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_INTERNAL_ERROR);
-        return 0;
-    }
-
-    if (!PACKET_get_1(pkt, &cert_type)) {
-        SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_INTERNAL_ERROR);
-        return 0;
-    }
-
-    if ((cert_type_data->support & SSL_RFC8902_1609)
-            && cert_type == CertificateType1609Dot2) {
-        cert_type_data->type_decided = cert_type;
-    } else if ((cert_type_data->support & SSL_RFC8902_X509)
-            && cert_type == CertificateTypeX509) {
-        cert_type_data->type_decided = cert_type;
-    } else {
-        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_UNSUPPORTED_CERT_TYPE);
-        return 0;
-    }
-
-    return 1;
-}
-
-/* Construct extension sent from server to client */
-static int tls_construct_stoc_cert_type_ext(SSL *s, WPACKET *pkt, unsigned int context,
-                           X509 *x, size_t chainidx, int ext_idx)
-{
-    RFC8902_CERT_TYPE * cert_type_data;
-
-    if (!SSL_is_RFC8902_supported(s)) {
-        return 2;
-    }
-
-    cert_type_data = SSL_get_RFC8902_CERT_TYPE(s, ext_idx);
-
-    // if nothing is agreed something went very wrong
-    if (cert_type_data->type_decided == -1) {
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-        return 0;
-    }
-
-    // send single type supported by the client
-    if (!WPACKET_put_bytes_u16(pkt, ext_idx)
-        || !WPACKET_start_sub_packet_u16(pkt)
-        || !WPACKET_put_bytes_u8(pkt, cert_type_data->type_decided)
-        || !WPACKET_close(pkt)) {
-            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-            return 0;
-        }
-    return 1;
-}
-
-/* Construct extension sent from client to server */
-static int tls_construct_ctos_cert_type_ext(SSL *s, WPACKET *pkt, unsigned int context,
-                           X509 *x, size_t chainidx, int ext_idx)
-{
-    RFC8902_CERT_TYPE * cert_type_data;
-
-    if (!SSL_is_RFC8902_supported(s)) {
-        return 2;
-    }
-
-    cert_type_data = SSL_get_RFC8902_CERT_TYPE(s, ext_idx);
-
-    if (!WPACKET_put_bytes_u16(pkt, ext_idx)
-        || !WPACKET_start_sub_packet_u16(pkt)
-        || !WPACKET_start_sub_packet_u8(pkt)
-        || ((cert_type_data->support & SSL_RFC8902_X509)
-                ? !WPACKET_put_bytes_u8(pkt, CertificateTypeX509)
-                : 0)
-        || ((cert_type_data->support & SSL_RFC8902_1609)
-                ? !WPACKET_put_bytes_u8(pkt, CertificateType1609Dot2)
-                : 0)
-        || !WPACKET_close(pkt)
-        || !WPACKET_close(pkt)) {
-            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
-            return 0;
-        }
-    return 1;
-}
-
-/* Parse extension sent from client to server */
-int tls_parse_ctos_srv_type_ext(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
-                  size_t chainidx)
-{
-    return tls_parse_ctos_cert_type_ext(s, pkt, context, x, chainidx,
-        TLSEXT_TYPE_server_certificate_type);
-}
-
-/* Parse extension sent from server to client */
-int tls_parse_stoc_srv_type_ext(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
-                size_t chainidx)
-{
-    return tls_parse_stoc_cert_type_ext(s, pkt, context, x, chainidx,
-        TLSEXT_TYPE_server_certificate_type);
-}
-
-/* Construct extension sent from server to client */
-int tls_construct_stoc_srv_type_ext(SSL *s, WPACKET *pkt, unsigned int context,
-                           X509 *x, size_t chainidx)
-{
-    return tls_construct_stoc_cert_type_ext(s, pkt, context, x, chainidx,
-            TLSEXT_TYPE_server_certificate_type);
-}
-
-/* Construct extension sent from client to server */
-int tls_construct_ctos_srv_type_ext(SSL *s, WPACKET *pkt, unsigned int context,
-                           X509 *x, size_t chainidx)
-{
-    return tls_construct_ctos_cert_type_ext(s, pkt, context, x, chainidx,
-            TLSEXT_TYPE_server_certificate_type);
-}
-
-/* Parse extension sent from client to server */
-int tls_parse_ctos_clnt_type_ext(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
-                  size_t chainidx)
-{
-    //RFC7250: The server MUST also include a certificate_request payload in the server hello message
-    // is this the correct way?
-    SSL_set_verify(s, SSL_VERIFY_PEER, NULL);
-    return tls_parse_ctos_cert_type_ext(s, pkt, context, x, chainidx,
-            TLSEXT_TYPE_client_certificate_type);
-}
-
-/* Parse extension sent from server to client */
-int tls_parse_stoc_clnt_type_ext(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
-                size_t chainidx)
-{
-    return tls_parse_stoc_cert_type_ext(s, pkt, context, x, chainidx,
-            TLSEXT_TYPE_client_certificate_type);
-}
-
-/* Construct extension sent from server to client */
-int tls_construct_stoc_clnt_type_ext(SSL *s, WPACKET *pkt, unsigned int context,
-                           X509 *x, size_t chainidx)
-{
-    return tls_construct_stoc_cert_type_ext(s, pkt, context, x, chainidx,
-            TLSEXT_TYPE_client_certificate_type);
-}
-
-/* Construct extension sent from client to server */
-int tls_construct_ctos_clnt_type_ext(SSL *s, WPACKET *pkt, unsigned int context,
-                           X509 *x, size_t chainidx)
-{
-    return tls_construct_ctos_cert_type_ext(s, pkt, context, x, chainidx,
-            TLSEXT_TYPE_client_certificate_type);
-}
-
 int SSL_use_1609_cert(SSL *s, const unsigned char * data, size_t len, uint64_t psid)
 {
     const unsigned char *p = data;
@@ -1433,12 +1202,12 @@ int SSL_use_1609_cert(SSL *s, const unsigned char * data, size_t len, uint64_t p
 
     cert = X509_new_IEEE1609_CERT(&p, len);
     if (cert == NULL) {
-        SSLerr(SSL_F_SSL_USE_1609_CERT, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return 0;
     }
     // get hash for the certificate from buffer
     if (!IEEE1609_CERT_verify(cert)) {
-        SSLerr(SSL_F_SSL_USE_1609_CERT, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         goto out;
     }
     ret = SSL_use_certificate(s, cert);
@@ -1447,7 +1216,7 @@ out:
     return ret;
 }
 
-int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[HASHEDID8_LEN], uint64_t psid)
+int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[8], uint64_t psid)
 {
     X509 *cert_x = NULL;
     IEEE1609_CERT * cert_1609 = NULL;
@@ -1462,18 +1231,18 @@ int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[HASHEDID8_LEN
 
     msg = SEC_ENT_MSG_new_TYPE_GET_CERT(hashedid);
     if (msg == NULL) {
-        SSLerr(SSL_F_SSL_USE_1609_CERT_BY_HASH, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         goto out;
     }
 
     reply = sec_ent_process(msg);
     if (reply == NULL) {
-        SSLerr(SSL_F_SSL_USE_1609_CERT_BY_HASH, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         goto out;
     }
 
     if (reply->msg_type != SEC_ENT_MSG_TYPE_GET_CERT) {
-        SSLerr(SSL_F_SSL_USE_1609_CERT_BY_HASH, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
 #ifdef TLS_13_1609_DEBUG
         fprintf(stderr,
             ">>> SSL_use_1609_cert_by_hash something went wrong reply %d\n",
@@ -1487,13 +1256,13 @@ int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[HASHEDID8_LEN
     // last byte is presence of verification status - we didn't ask for it
     cert_x = X509_new_IEEE1609_CERT(&p, reply->len - 1);
     if (cert_x == NULL) {
-        SSLerr(SSL_F_SSL_USE_1609_CERT_BY_HASH, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         goto out;
     }
 
     cert_1609 = IEEE1609_CERT_from_X509(cert_x);
     if (cert_1609 == NULL) {
-        SSLerr(SSL_F_SSL_USE_1609_CERT_BY_HASH, ERR_R_INTERNAL_ERROR);
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         goto out;
     }
 
@@ -1502,8 +1271,9 @@ int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[HASHEDID8_LEN
     memcpy(cert_1609->hashedid8, hashedid, HASHEDID8_LEN);
 
 	// A hack - otherwise openssl thinks there is no key - so no cert_verify is generated
-	if (!SSL_use_RSAPrivateKey_ASN1(s, key_der, key_der_len)) {
-		SSLerr(SSL_F_SSL_ENABLE_RFC8902_SUPPORT, ERR_R_INTERNAL_ERROR);
+	// if (!SSL_use_RSAPrivateKey_ASN1(s, key_der, key_der_len)) {
+    if (!SSL_use_PrivateKey_ASN1(EVP_PKEY_RSA, s, key_der, key_der_len)) {
+		ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
 		goto out;
 	}
 
@@ -1539,7 +1309,7 @@ int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid, unsigned char hash
 
 	ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
 	if (ieee1609_state->psid_other_side == 0x00) {
-		SSLerr(SSL_F_SSL_GET_1609_PSID_RECEIVED, SSL_R_NOT_1609_CERT);
+		ERR_raise(ERR_LIB_SSL, SSL_R_NOT_1609_CERT);
 		return 0;
 	}
 	*psid = ieee1609_state->psid_other_side;
@@ -1550,14 +1320,14 @@ int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid, unsigned char hash
 
 		peer_x = SSL_get_peer_certificate(s);
 		if (peer_x == NULL) {
-			SSLerr(SSL_F_SSL_GET_1609_PSID_RECEIVED, ERR_R_INTERNAL_ERROR);
+			ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
 			return 0;
 		}
 
 		cert = IEEE1609_CERT_from_X509(peer_x);
 
 		if (cert == NULL) {
-			SSLerr(SSL_F_SSL_GET_1609_PSID_RECEIVED, SSL_R_NOT_1609_CERT);
+			ERR_raise(ERR_LIB_SSL, SSL_R_NOT_1609_CERT);
 			return 0;
 		}
 

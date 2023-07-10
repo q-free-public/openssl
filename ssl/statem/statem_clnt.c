@@ -1918,16 +1918,16 @@ WORK_STATE tls_post_process_server_certificate(SSL *s, WORK_STATE wst)
             SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
             return WORK_ERROR;
         }
-    }
-    /*
-     * Check certificate type is consistent with ciphersuite. For TLS 1.3
-     * skip check since TLS 1.3 ciphersuites can be used with any certificate
-     * type.
-     */
-    if (!SSL_IS_TLS13(s)) {
-        if ((clu->amask & s->s3.tmp.new_cipher->algorithm_auth) == 0) {
-            SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_WRONG_CERTIFICATE_TYPE);
-            return WORK_ERROR;
+        /*
+         * Check certificate type is consistent with ciphersuite. For TLS 1.3
+         * skip check since TLS 1.3 ciphersuites can be used with any certificate
+         * type.
+         */
+        if (!SSL_IS_TLS13(s)) {
+            if ((clu->amask & s->s3.tmp.new_cipher->algorithm_auth) == 0) {
+                SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_WRONG_CERTIFICATE_TYPE);
+                return WORK_ERROR;
+            }
         }
     }
 

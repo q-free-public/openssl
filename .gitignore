@@ -133,6 +133,8 @@ providers/common/include/prov/der_sm2.h
 *.ld
 /apps/progs.c
 /apps/progs.h
+util/libcrypto.num
+util/libssl.num
 
 # Windows (legacy)
 /tmp32

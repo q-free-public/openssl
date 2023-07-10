@@ -7,6 +7,25 @@
 #define TLSEXT_TYPE_client_certificate_type 19
 #define TLSEXT_TYPE_server_certificate_type 20
 
+/* Managed by IANA */
+ enum CertificateType{
+	 CertificateTypeX509 = 0,
+	 CertificateTypeRawPublicKey = 2,
+	 CertificateType1609Dot2 = 3
+ };
+
+struct RFC8902_cert_type_st {
+    // do we allow 1609 or X509 certs on this side?
+    int support;
+    // cert type decided to use based on server_cert_type extension
+    // -1 in case of no decision
+    int type_decided;
+};
+
+typedef struct RFC8902_cert_type_st RFC8902_CERT_TYPE;
+
+RFC8902_CERT_TYPE * SSL_get_RFC8902_CERT_TYPE(SSL * s, int ext_idx);
+
 // check if cert is a 1609.2 certificate
 int X509_is_IEEE1609_CERT(X509 * x);
 // create new certificate which in fact is an IEEE1609.2 certificate
@@ -14,7 +33,8 @@ X509 * X509_new_IEEE1609_CERT(const unsigned char **ppin, long length);
 // include 1609 test cert in X509 cert structure
 int X509_append_IEEE1609_CERT_test(X509 * x);
 
-void IEEE1609_TLS_init();
+void IEEE1609_TLS_init(void);
+void IEEE1609_TLS_free(void);
 
 // Verify 1609.2 certificate from X509 struct
 int IEEE1609_CERT_verify(X509 * x);
@@ -36,32 +56,5 @@ int tls_construct_IEEE1609_CERT_cert_verify(SSL *s, WPACKET *pkt, X509* x,
 int tls_process_IEEE1609_CERT_cert_verify(SSL *s, X509 * x,
     const unsigned char * verify_input, size_t verify_input_len,
     const unsigned char * verify_data, size_t verify_data_len);
-
-
-/* Parse extension sent from client to server */
-int tls_parse_ctos_srv_type_ext(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
-                  size_t chainidx);
-/* Parse extension send from server to client */
-int tls_parse_stoc_srv_type_ext(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
-                size_t chainidx);
-/* Construct extension sent from server to client */
-int tls_construct_stoc_srv_type_ext(SSL *s, WPACKET *pkt, unsigned int context,
-                           X509 *x, size_t chainidx);
-/* Construct extension sent from client to server */
-int tls_construct_ctos_srv_type_ext(SSL *s, WPACKET *pkt, unsigned int context,
-                           X509 *x, size_t chainidx);
-/* Parse extension sent from client to server */
-int tls_parse_ctos_clnt_type_ext(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
-                 size_t chainidx);
-/* Parse extension send from server to client */
-int tls_parse_stoc_clnt_type_ext(SSL *s, PACKET *pkt, unsigned int context, X509 *x,
-               size_t chainidx);
-/* Construct extension sent from server to client */
-int tls_construct_stoc_clnt_type_ext(SSL *s, WPACKET *pkt, unsigned int context,
-                          X509 *x, size_t chainidx);
-/* Construct extension sent from client to server */
-int tls_construct_ctos_clnt_type_ext(SSL *s, WPACKET *pkt, unsigned int context,
-                          X509 *x, size_t chainidx);
-
 
 // int SSL_use_1609_cert(SSL *s, const unsigned char * data, size_t len);
