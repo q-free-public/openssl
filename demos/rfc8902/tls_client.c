@@ -16,6 +16,7 @@
 #include <string.h>
 #include <getopt.h>
 #include <pcap.h>
+#include <arpa/inet.h>
 
 /* Managed by IANA */
  enum CertificateType{
@@ -25,9 +26,11 @@
  } ;
 
 
-unsigned char __1609dot2_ec_cert_hash[8] = {
+#define CERT_HASH_LEN 8
+unsigned char __1609dot2_ec_cert_hash[CERT_HASH_LEN] = {
 	0xC4, 0x3B, 0x88, 0xB2, 0x35, 0x81, 0xDD, 0x3B
 };
+uint64_t __1609dot2_psid = 623;
 
 void handler(int signal) {
     fprintf(stderr, "Server received %d signal\n", signal);
@@ -65,10 +68,16 @@ void keylog_srv_cb_func(const SSL *ssl, const char *line) {
 	}
 }
 
+void print_hex_array(int len, const unsigned char * ptr) {
+	for (int i = 0; i < len; i++) {
+		printf("%02X", ptr[i]);
+	}
+}
+
 int ssl_send_message(SSL *s, char * message, size_t message_len) {
 	int processed = 0;
 
-	printf("Sending [%ld] %.*s\n", message_len, (int)message_len, message);
+	printf("Sending [%zd] %.*s\n", message_len, (int)message_len, message);
 	for (const char *start = message; start - message < message_len;
 	     start += processed) {
 
@@ -99,28 +108,26 @@ int ssl_recv_message(SSL *s, char * buff, size_t buff_len) {
 }
 
 int ssl_print_1609_status(SSL *s) {
-//	uint64_t psid;
-//	unsigned char hashed_id[8];
-//	if(SSL_get_1609_psid_received(s, &psid, hashed_id) <= 0) {
-//		ERR_print_errors_fp(stderr);
-//		fprintf(stderr, "SSL_get_1609_psid_received failed\n");
-//		return 0;
-//	}
-//	long verify_result = 0;
-//	if((verify_result = SSL_get_verify_result(s)) != X509_V_OK) {
-//		ERR_print_errors_fp(stderr);
-//		fprintf(stderr, "SSL_get_verify_result failed %ld\n", verify_result);
-//		return 0;
-//	} else {
-//		printf("Peer verification %ld\n", verify_result);
-//	}
-//
-//	printf("Psid used for TLS is %ld\n", psid);
-//	printf("Cert used for TLS is ");
-//	for (int i = 0; i < 8; i++) {
-//		printf("%02X", hashed_id[i]);
-//	}
-//	printf("\n");
+	uint64_t psid;
+	unsigned char hashed_id[CERT_HASH_LEN];
+	if(SSL_get_1609_psid_received(s, &psid, hashed_id) <= 0) {
+		ERR_print_errors_fp(stderr);
+		fprintf(stderr, "SSL_get_1609_psid_received failed\n");
+		return 0;
+	}
+	long verify_result = 0;
+	if((verify_result = SSL_get_verify_result(s)) != X509_V_OK) {
+		ERR_print_errors_fp(stderr);
+		fprintf(stderr, "SSL_get_verify_result failed %ld\n", verify_result);
+		return 0;
+	} else {
+		printf("Peer verification %ld\n", verify_result);
+	}
+
+	printf("Psid used for TLS is %llu\n", psid);
+	printf("Cert used for TLS is ");
+	print_hex_array(CERT_HASH_LEN, hashed_id);
+	printf("\n");
 	return 1;
 }
 
@@ -234,7 +241,7 @@ void server(int server_port, int test_mode) {
 				exit(EXIT_FAILURE);
 			}
 		} else {
-			if (!SSL_use_1609_cert_by_hash(ssl, __1609dot2_ec_cert_hash, 623)) {
+			if (!SSL_use_1609_cert_by_hash(ssl, __1609dot2_ec_cert_hash, __1609dot2_psid)) {
 				fprintf(stderr, "SSL_use_1609_cert_by_hash failed\n");
 				ERR_print_errors_fp(stderr);
 				exit(EXIT_FAILURE);
@@ -419,7 +426,7 @@ void client(int server_port, int test_mode) {
 			terminate();
 		}
 	} else {
-		if (!SSL_use_1609_cert_by_hash(ssl, __1609dot2_ec_cert_hash, 623)) {
+		if (!SSL_use_1609_cert_by_hash(ssl, __1609dot2_ec_cert_hash, __1609dot2_psid)) {
 			fprintf(stderr, "SSL_use_1609_cert_by_hash failed\n");
 			ERR_print_errors_fp(stderr);
 			exit(EXIT_FAILURE);
@@ -442,7 +449,7 @@ void client(int server_port, int test_mode) {
 
     int send_messages = 1;
     while (send_messages) {
-	    printf("input message to server\n");
+	    printf("input message to server, type exit to quit\n");
 	    char *line = NULL;
 	    size_t line_len = 0;
 	    if (test_mode) {
@@ -546,7 +553,7 @@ int main(int argc, char **argv) {
 	int test = 0;
 	int opt, rc;
 
-	while ((opt = getopt(argc, argv, "p:a:cstx")) != -1) {
+	while ((opt = getopt(argc, argv, "p:a:cstxn:b:")) != -1) {
 		switch (opt) {
 		case 'c': start_client = 1; break;
 		case 's': start_server = 1; break;
@@ -560,18 +567,48 @@ int main(int argc, char **argv) {
 		case 't': test = 1; break;
 		case 'x': force_x509 = 1; break;
 		case 'a':
-			strcpy(server_ip, optarg);
+			strncpy(server_ip, optarg, INET_ADDRSTRLEN);
+			break;
+		case 'n':
+			rc = sscanf(optarg, "%llu", &__1609dot2_psid);
+			if (rc < 1) {
+				fprintf(stderr, "String-integer conversion error for %s\n", optarg);
+				exit(EXIT_FAILURE);
+			}
+			break;
+		case 'b': {
+			const char * pos_str = optarg;
+			int pos_hash = 0; 
+			if (2*CERT_HASH_LEN != strlen(optarg)) {
+				fprintf(stderr, "Wrong length hex string %s - expected %d\n", optarg, 2*CERT_HASH_LEN);
+				exit(EXIT_FAILURE);
+			}
+			for (int i = 0; i < CERT_HASH_LEN; i++) {
+				rc = sscanf(pos_str, "%2hhx", &__1609dot2_ec_cert_hash[pos_hash]);
+				if (rc < 1) {
+					fprintf(stderr, "Failed to parse hex string %s\n", optarg);
+					exit(EXIT_FAILURE);
+				}
+				pos_hash++;
+				pos_str += 2;
+			}
+			}	
 			break;
 		default:
 			fprintf(stderr, "Usage: %s [-p port] [-c -> client] [-s -> server]\n"
 					"  -t - test mode\n"
 					"  -x - force X509 cert\n"
-					"  -a - server address\n", argv[0]);
+					"  -a - server address\n"
+					"  -n PSID - specify PSID value (default %llu)\n"
+					"  -b HASH - specify cert hash to use\n", argv[0], __1609dot2_psid);
 			exit(EXIT_FAILURE);
 		}
 	}
 
 	printf("Using port %hu\n", server_port);
+	printf("Using certificate ");
+	print_hex_array(CERT_HASH_LEN, __1609dot2_ec_cert_hash);
+	printf(" with PSID %llu\n", __1609dot2_psid);
 
 	if (!(start_client || start_server)) {
 		test = 1;
