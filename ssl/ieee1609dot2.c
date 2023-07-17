@@ -7,6 +7,7 @@
 #include "ieee1609dot2.h"
 #include "ssl_local.h"
 #include "statem/statem_local.h"
+#include "internal/endian.h"
 
 #define _1609DOT2_VSN 0x1609
 
@@ -383,6 +384,34 @@ struct sec_ent_msg_st {
 
 typedef struct sec_ent_msg_st SEC_ENT_MSG;
 
+/* Not all platforms have htobe64(). */
+static uint64_t be64(uint64_t host)
+{
+    uint64_t big;
+    uint8_t *data_out = (uint8_t *)&big;
+    uint8_t *data_in = (uint8_t *)&host;
+    DECLARE_IS_ENDIAN;
+
+    if (!IS_LITTLE_ENDIAN)
+        return host;
+
+    data_out[0] = data_in[7];
+    data_out[1] = data_in[6];
+    data_out[2] = data_in[5];
+    data_out[3] = data_in[4];
+    data_out[4] = data_in[3];
+    data_out[5] = data_in[2];
+    data_out[6] = data_in[1];
+    data_out[7] = data_in[0];
+
+    return big;
+}
+
+/* Not all platforms have be64toh(). */
+static uint64_t h64(uint64_t big)
+{
+    return be64(big);
+}
 
 static SEC_ENT_MSG * SEC_ENT_MSG_new_from_type_allocate(uint8_t msg_type, size_t len)
 {
@@ -489,7 +518,7 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_TYPE_TLS_SIGN_DATA(
     }
 
     unsigned char * msg_pos = msg->data;
-    psid_tmp = htobe64(psid);
+    psid_tmp = be64(psid);
     memcpy(msg_pos, &psid_tmp, sizeof(psid_tmp));
     msg_pos += sizeof(psid_tmp);
     memcpy(msg_pos, hashedid8, HASHEDID8_LEN);
@@ -561,7 +590,7 @@ static int SEC_ENT_MSG_get_send_buffer(SEC_ENT_MSG * msg,
 }
 
 static void print_buffer(const unsigned char * data, size_t len) {
-    fprintf(stderr, ">>> Buffer len[%ld] \n", len);
+    fprintf(stderr, ">>> Buffer len[%zu] \n", len);
     for (int i = 0; i < (int)len; i++) {
         fprintf(stderr, "%02x ", ((unsigned char *) data)[i]);
         if ((i+1)%20 == 0) {
@@ -1173,7 +1202,7 @@ int tls_process_IEEE1609_CERT_cert_verify(SSL *s, X509 * x,
         goto err;
     }
     memcpy(&psid, reply->data, sizeof(psid));
-    psid = be64toh(psid);
+    psid = h64(psid);
 
     // set the PSID used
 	SSL_IEEE1609 * ieee1609_state = NULL;
