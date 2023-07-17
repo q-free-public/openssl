@@ -7,7 +7,7 @@
 
 name: Fuzz-checker CI
 
-on: [push]
+on: []
 
 permissions:
   contents: read

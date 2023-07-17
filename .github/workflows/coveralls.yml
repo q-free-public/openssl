@@ -8,9 +8,7 @@
 name: Coverage
 
 #Run once a day
-on:
-  schedule:
-    - cron:  '49 0 * * *'
+on: []
 
 permissions:
   contents: read

@@ -6,11 +6,7 @@
 # https://www.openssl.org/source/license.html
 
 name: FIPS Changed Label
-on:
-  workflow_run:
-    workflows: ["FIPS Checksums"]
-    types:
-      - completed
+on: []
 
 permissions:
   contents: read
