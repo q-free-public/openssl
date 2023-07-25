@@ -367,8 +367,8 @@ static int g_ssl_1609_idx = -1;
 // uint8_t -> type
 // uint32_t -> length
 #define HASHEDID8_LEN 8
+#define MAX_SSP_LEN 100
 #define SEC_ENT_MSG_HDR_LEN 5
-#define SEC_ENT_MSG_TYPE_RELOAD 0x01
 #define SEC_ENT_MSG_TYPE_FAILURE 0x03
 #define SEC_ENT_MSG_TYPE_GET_CERT 8
 #define SEC_ENT_MSG_TYPE_TLS_VERIFY_CERTS 18
@@ -808,6 +808,10 @@ struct ssl_IEEE1609_st {
     // psid to use when making cert verify
     uint64_t psid_this_side;
     uint64_t psid_other_side;
+
+    // SSP mathing cert and PSID used by the other side
+    size_t ssp_other_side_len;
+    uint8_t ssp_other_side[MAX_SSP_LEN];
 };
 
 typedef struct ssl_IEEE1609_st SSL_IEEE1609;
@@ -845,6 +849,7 @@ static void CRYPTO_EX_SSL_IEEE1609_new(void *parent, void *ptr, CRYPTO_EX_DATA *
     data->clnt.type_decided = -1;
     data->psid_this_side = 0x00;
     data->psid_other_side = 0x00;
+    data->ssp_other_side_len = 0;
 
     CRYPTO_set_ex_data(ad, idx, data);
 }
@@ -1207,19 +1212,24 @@ int tls_process_IEEE1609_CERT_cert_verify(SSL *s, X509 * x,
     print_buffer(reply->data, reply->len);
 #endif
 
+    // set the PSID used
+	SSL_IEEE1609 * ieee1609_state = NULL;
+
+	ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
+
     uint64_t psid;
-    if (reply->len != sizeof(psid)) {
+    if (reply->len < sizeof(psid) || reply->len > sizeof(psid) + MAX_SSP_LEN) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
     }
     memcpy(&psid, reply->data, sizeof(psid));
     psid = h64(psid);
-
-    // set the PSID used
-	SSL_IEEE1609 * ieee1609_state = NULL;
-
-	ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
 	ieee1609_state->psid_other_side = psid;
+
+    ieee1609_state->ssp_other_side_len = reply->len - sizeof(psid);
+    if (ieee1609_state->ssp_other_side_len > 0 && ieee1609_state->ssp_other_side_len < MAX_SSP_LEN) {
+        memcpy(&ieee1609_state->ssp_other_side, reply->data + sizeof(psid), ieee1609_state->ssp_other_side_len);
+    }
 
     SEC_ENT_MSG_free(msg);
     SEC_ENT_MSG_free(reply);
@@ -1344,7 +1354,9 @@ int SSL_enable_RFC8902_support(SSL *s, int server_support, int client_support) {
     return 1;
 }
 
-int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid, unsigned char hashedid[HASHEDID8_LEN]) {
+int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid,
+                               size_t * ssp_len, uint8_t ** ssp,
+                               unsigned char hashedid[HASHEDID8_LEN]) {
 	SSL_IEEE1609 * ieee1609_state = NULL;
 
 	ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
@@ -1352,7 +1364,21 @@ int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid, unsigned char hash
 		ERR_raise(ERR_LIB_SSL, SSL_R_NOT_1609_CERT);
 		return 0;
 	}
+
 	*psid = ieee1609_state->psid_other_side;
+    *ssp_len = ieee1609_state->ssp_other_side_len;
+    if (*ssp != NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+        return 0;
+    }
+    if (*ssp_len != 0) {
+        *ssp = malloc(*ssp_len);
+        if (*ssp == NULL) {
+            ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+            return 0; 
+        }
+        memcpy(*ssp, ieee1609_state->ssp_other_side, *ssp_len);
+    }
 
 	if (hashedid != NULL) {
 		IEEE1609_CERT * cert = NULL;
@@ -1361,18 +1387,22 @@ int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid, unsigned char hash
 		peer_x = SSL_get0_peer_certificate(s);
 		if (peer_x == NULL) {
 			ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
-			return 0;
+			goto err;
 		}
 
 		cert = IEEE1609_CERT_from_X509(peer_x);
 
 		if (cert == NULL) {
 			ERR_raise(ERR_LIB_SSL, SSL_R_NOT_1609_CERT);
-			return 0;
+			goto err;
 		}
 
 		memcpy(hashedid, cert->hashedid8, HASHEDID8_LEN);
 	}
 	return 1;
+err:
+    free(ssp);
+    ssp = NULL;
+    return 0;
 
 }

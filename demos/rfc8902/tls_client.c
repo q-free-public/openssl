@@ -32,13 +32,19 @@ unsigned char __1609dot2_ec_cert_hash[CERT_HASH_LEN] = {
 };
 uint64_t __1609dot2_psid = 623;
 
-void handler(int signal) {
-    fprintf(stderr, "Server received %d signal\n", signal);
-}
-
 pid_t server_pid = -1;
 int force_x509 = 0;
 char server_ip[INET_ADDRSTRLEN] = "127.0.0.1";
+int do_exit = 0;
+
+void handler(int signal) {
+    fprintf(stderr, "Server received %d signal\n", signal);
+	if (signal = SIGINT) {
+		fprintf(stderr, "Will initialize the termination\n");
+		do_exit = 1;
+	}
+}
+
 
 void terminate() {
 	if (server_pid >= 0) {
@@ -108,9 +114,13 @@ int ssl_recv_message(SSL *s, char * buff, size_t buff_len) {
 }
 
 int ssl_print_1609_status(SSL *s) {
+	printf("Information about the other side of the connection:\n");
 	uint64_t psid;
+	size_t ssp_len;
+	uint8_t *ssp = NULL;
 	unsigned char hashed_id[CERT_HASH_LEN];
-	if(SSL_get_1609_psid_received(s, &psid, hashed_id) <= 0) {
+
+	if(SSL_get_1609_psid_received(s, &psid, &ssp_len, &ssp, hashed_id) <= 0) {
 		ERR_print_errors_fp(stderr);
 		fprintf(stderr, "SSL_get_1609_psid_received failed\n");
 		return 0;
@@ -119,23 +129,89 @@ int ssl_print_1609_status(SSL *s) {
 	if((verify_result = SSL_get_verify_result(s)) != X509_V_OK) {
 		ERR_print_errors_fp(stderr);
 		fprintf(stderr, "SSL_get_verify_result failed %ld\n", verify_result);
+		free(ssp);
 		return 0;
 	} else {
 		printf("Peer verification %ld\n", verify_result);
 	}
 
 	printf("Psid used for TLS is %llu\n", psid);
+	printf("SSP used for TLS are [");
+	print_hex_array(ssp_len, ssp);
+	printf("]\n");
 	printf("Cert used for TLS is ");
 	print_hex_array(CERT_HASH_LEN, hashed_id);
 	printf("\n");
+
+	free(ssp);
 	return 1;
+}
+
+SSL_CTX *create_context() {
+	SSL_CTX *ret = NULL;
+
+	ret = SSL_CTX_new(TLS_server_method());
+	if (!ret) {
+		fprintf(stderr, "SSL_CTX_new failed\n");
+		return NULL;
+	}
+	SSL_CTX_set_keylog_callback(ret, keylog_srv_cb_func);
+	if (!SSL_CTX_set_min_proto_version(ret, TLS1_3_VERSION)) {
+		fprintf(stderr, "SSL_CTX_set_min_proto_version failed: ");
+		ERR_print_errors_fp(stderr);
+		goto err;
+	}
+	if (1 != SSL_CTX_load_verify_locations(ret, "ca.cert.pem", NULL)) {
+		fprintf(stderr, "SSL_CTX_load_verify_locations failed: ");
+		ERR_print_errors_fp(stderr);
+		goto err;
+	}
+	return ret;
+err:
+	SSL_CTX_free(ret);
+	return NULL;
+}
+
+int create_socket(int port) {
+	int sock;
+	struct sockaddr_in server_addr;
+	int true = 1;
+
+	memset((char *) &server_addr, 0, sizeof(server_addr));  /* 0 out the structure */
+	server_addr.sin_family = AF_INET;   /* address family */
+	server_addr.sin_port = htons(port);
+	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	/* Server */
+	sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0) {
+		perror("socket failed");
+		goto err;
+	}
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &true, sizeof(true))) {
+		perror("setsockopt failed\n");
+		goto err;
+	}
+	if (bind(sock, (const struct sockaddr *) &server_addr, sizeof(server_addr))) {
+		perror("bind failed");
+		goto err;
+	}
+	if (listen(sock, 1)) {
+		perror("listen failed");
+		goto err;
+	}
+
+	return sock;
+err:
+	close(sock);
+	return -1;
 }
 
 void server(int server_port, int test_mode) {
 	char buffer[1024];
 	int processed;
 	SSL_CTX *ssl_ctx;
-	SSL *ssl;
+	int sock;
 	int retval;
 
 	keylog_server_file = fopen("keylog_server.txt", "a");
@@ -144,33 +220,6 @@ void server(int server_port, int test_mode) {
 		exit(EXIT_FAILURE);
 	}
 
-	struct sockaddr_in server_addr;
-	memset((char *) &server_addr, 0, sizeof(server_addr));  /* 0 out the structure */
-	server_addr.sin_family = AF_INET;   /* address family */
-	server_addr.sin_port = htons(server_port);
-	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-	/* Server */
-	int server_socket = socket(AF_INET, SOCK_STREAM, 0);
-	int true = 1;
-	if (server_socket < 0) {
-		perror("socket failed");
-		exit(EXIT_FAILURE);
-	}
-	if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &true, sizeof(true))) {
-		perror("setsockopt failed\n");
-		exit(EXIT_FAILURE);
-	}
-	if (bind(server_socket, (const struct sockaddr *) &server_addr, sizeof(server_addr))) {
-		perror("bind failed");
-		exit(EXIT_FAILURE);
-	}
-	if (listen(server_socket, 1)) {
-		perror("listen failed");
-		exit(EXIT_FAILURE);
-	}
-
-	int fd;
 	struct sigaction action;
 	sigset_t sigset;
 
@@ -181,15 +230,32 @@ void server(int server_port, int test_mode) {
 	action.sa_flags = 0;
 	action.sa_mask = sigset;
 	sigaction(SIGPIPE, &action, NULL);
+	sigaction(SIGINT, &action, NULL);
+
+	ssl_ctx = create_context();
+	if(ssl_ctx == NULL) {
+		fprintf(stderr, "create_context failed\n");
+		exit(EXIT_FAILURE);
+	}
+
+	sock = create_socket(server_port);
+	if(sock <= 0) {
+		fprintf(stderr, "create_socket failed\n");
+		SSL_CTX_free(ssl_ctx);
+		exit(EXIT_FAILURE);
+	}
 
 	int handle_clients = 1;
-	while (handle_clients) {
-		printf("Waiting for client.. \n");
+	while (handle_clients && !do_exit) {
+		SSL *ssl;
+		int client;
 
-		fd = accept(server_socket, NULL, 0);
-		if (fd < 0) {
+		printf("Waiting for client to connect.. \n");
+
+		client = accept(sock, NULL, 0);
+		if (client < 0) {
 			perror("accept failed");
-			exit(EXIT_FAILURE);
+			continue;
 		}
 		printf("TCP accepted.\n");
 
@@ -198,22 +264,6 @@ void server(int server_port, int test_mode) {
 			exit(EXIT_FAILURE);
 		}*/
 		/*OpenSSL_add_ssl_algorithms();*/
-		ssl_ctx = SSL_CTX_new(TLS_server_method());
-		if (!ssl_ctx) {
-			fprintf(stderr, "SSL_CTX_new failed\n");
-			exit(EXIT_FAILURE);
-		}
-		SSL_CTX_set_keylog_callback(ssl_ctx, keylog_srv_cb_func);
-		if (!SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_3_VERSION)) {
-			fprintf(stderr, "SSL_CTX_set_min_proto_version failed: ");
-			ERR_print_errors_fp(stderr);
-			exit(EXIT_FAILURE);
-		}
-		if (1 != SSL_CTX_load_verify_locations(ssl_ctx, "ca.cert.pem", NULL)) {
-			fprintf(stderr, "SSL_CTX_load_verify_locations failed: ");
-			ERR_print_errors_fp(stderr);
-			exit(EXIT_FAILURE);
-		}
 		ssl = SSL_new(ssl_ctx);
 		if (!ssl) {
 			fprintf(stderr, "SSL_new failed\n");
@@ -231,7 +281,7 @@ void server(int server_port, int test_mode) {
 		}
 		if (force_x509) {
 			if (1 != SSL_use_PrivateKey_file(ssl, "server.key.pem", SSL_FILETYPE_PEM)) {
-				fprintf(stderr, "SSL_use_PrivatKey_file failed: ");
+				fprintf(stderr, "SSL_use_PrivateKey_file failed: ");
 				ERR_print_errors_fp(stderr);
 				exit(EXIT_FAILURE);
 			}
@@ -247,7 +297,7 @@ void server(int server_port, int test_mode) {
 				exit(EXIT_FAILURE);
 			}
 		}
-		if (!SSL_set_fd(ssl, fd)) {
+		if (!SSL_set_fd(ssl, client)) {
 			fprintf(stderr, "SSL_set_fd failed\n");
 			exit(EXIT_FAILURE);
 		}
@@ -271,38 +321,36 @@ void server(int server_port, int test_mode) {
 			        SSL_get_error(ssl, retval), strerror(errno));
 			ERR_print_errors_fp(stderr);
 			fprintf(stderr, "\n");
-			exit(EXIT_FAILURE);
+			continue;
 		}
 		printf("SSL accepted.\n");
 		if (ssl_print_1609_status(ssl) == 0) {
-			terminate();
+			continue;
 		}
 
 		while (1) {
-			processed = SSL_read(ssl, buffer, sizeof(buffer));
-			printf("Server SSL_read returned %d\n", processed);
-			if (processed > 0) {
+			if ((processed = ssl_recv_message(ssl, buffer, sizeof(buffer))) > 0) {
 				printf("[server:] %.*s\n", (int) processed, buffer);
 				ssl_send_message(ssl, buffer, processed);
-				if (strcmp(buffer, "exit") == 0) {
+				if (strncmp(buffer, "shutdown\n", processed) == 0) {
+					printf("received a shutdown request");
 					handle_clients = 0;
+					break;
 				}
 			} else {
 				int ssl_error = SSL_get_error(ssl, processed);
+				ERR_print_errors_fp(stderr);
 				if (ssl_error == SSL_ERROR_ZERO_RETURN) {
 					printf("Server thinks a client closed a TLS session\n");
-					ERR_print_errors_fp(stderr);
 					break;
 				}
 				if (ssl_error != SSL_ERROR_WANT_READ &&
 				    ssl_error != SSL_ERROR_WANT_WRITE) {
 					fprintf(stderr, "server read failed: ssl_error=%d:\n", ssl_error);
-					ERR_print_errors_fp(stderr);
-					fprintf(stderr, "\n");
-					exit(EXIT_FAILURE);
+					break;
 				}
+				break;
 			}
-
 		}
 		printf("Server read finished.\n");
 
@@ -310,7 +358,7 @@ void server(int server_port, int test_mode) {
 		if (retval < 0) {
 			int ssl_err = SSL_get_error(ssl, retval);
 			fprintf(stderr, "Server SSL_shutdown failed: ssl_err=%d\n", ssl_err);
-			terminate();
+			continue;
 		}
 		printf("Server shut down a TLS session.\n");
 
@@ -327,13 +375,15 @@ void server(int server_port, int test_mode) {
 		printf("Server thinks a client shut down the TLS session.\n");
 
 		SSL_free(ssl);
-		SSL_CTX_free(ssl_ctx);
-		close(fd);
+		close(client);
 		if (test_mode) {
 			printf("Server exiting test mode...\n");
 			handle_clients = 0;
 		}
 	}
+
+	close(sock);
+	SSL_CTX_free(ssl_ctx);
 	if (keylog_server_file != NULL) {
 		fflush(keylog_server_file);
 		fclose(keylog_server_file);
@@ -350,6 +400,16 @@ void client(int server_port, int test_mode) {
 	int processed;
 	int wstatus;
 	int retval;
+
+	struct sigaction action;
+	sigset_t sigset;
+
+	sigemptyset(&sigset);
+	action.sa_handler = handler;
+	action.sa_flags = 0;
+	action.sa_mask = sigset;
+	sigaction(SIGPIPE, &action, NULL);
+	sigaction(SIGINT, &action, NULL);
 
 	keylog_client_file = fopen("keylog_client.txt", "a");
 	if (keylog_client_file == NULL) {
@@ -448,8 +508,8 @@ void client(int server_port, int test_mode) {
     }
 
     int send_messages = 1;
-    while (send_messages) {
-	    printf("input message to server, type exit to quit\n");
+    while (send_messages && !do_exit) {
+	    printf("input message to server, type exit or ^C to quit, send \"shutdown\" to stop the server\n");
 	    char *line = NULL;
 	    size_t line_len = 0;
 	    if (test_mode) {
@@ -461,7 +521,11 @@ void client(int server_port, int test_mode) {
 				    free(line);
 			    }
 			    fprintf(stderr, "getline failed\n");
-			    terminate();
+				if (!do_exit) {
+			    	terminate();
+				} else {
+					break;
+				}
 		    }
 	    }
 
