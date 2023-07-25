@@ -3463,7 +3463,7 @@ MSG_PROCESS_RETURN tls_process_client_certificate(SSL *s, PACKET *pkt)
         }
 
         if (SSL_is_using_1609_client(s)) {
-            x = X509_new_IEEE1609_CERT((const unsigned char **)&certbytes, l);
+            X509_set_IEEE1609_CERT(&x, (const unsigned char **)&certbytes, l);
         } else {
             d2i_X509(&x, (const unsigned char **)&certbytes, l);
         }
@@ -3543,8 +3543,8 @@ MSG_PROCESS_RETURN tls_process_client_certificate(SSL *s, PACKET *pkt)
             pkey = X509_get0_pubkey(sk_X509_value(sk, 0));
             if (pkey == NULL) {
                 SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
-                    goto err;
-                }
+                goto err;
+            }
         }
     }
 

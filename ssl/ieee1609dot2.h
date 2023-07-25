@@ -28,6 +28,8 @@ RFC8902_CERT_TYPE * SSL_get_RFC8902_CERT_TYPE(SSL * s, int ext_idx);
 
 // check if cert is a 1609.2 certificate
 int X509_is_IEEE1609_CERT(X509 * x);
+// set the certificate on an existing structure
+X509 * X509_set_IEEE1609_CERT(X509 **x, const unsigned char **ppin, long length);
 // create new certificate which in fact is an IEEE1609.2 certificate
 X509 * X509_new_IEEE1609_CERT(const unsigned char **ppin, long length);
 // include 1609 test cert in X509 cert structure

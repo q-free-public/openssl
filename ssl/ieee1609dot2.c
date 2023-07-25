@@ -637,7 +637,7 @@ static SEC_ENT_MSG * send_recv_server(int sock_fd,
     }
 
 #ifdef TLS_13_1609_DEBUG
-    fprintf(">>> send_recv_server - request\n");
+    fprintf(stderr, ">>> send_recv_server - request\n");
     print_buffer(out_data, out_len);
 #endif
     int write_len = write(sock_fd, out_data, out_len);
@@ -654,7 +654,7 @@ static SEC_ENT_MSG * send_recv_server(int sock_fd,
         return NULL;
     }
 #ifdef TLS_13_1609_DEBUG
-    fprintf(">>> send_recv_server - reply\n");
+    fprintf(stderr, ">>> send_recv_server - reply\n");
     print_buffer(buff, read_len);
 #endif
     reply = SEC_ENT_MSG_new_from_recv_buffer(buff, read_len);
@@ -917,11 +917,11 @@ void IEEE1609_TLS_init(void) {
 void IEEE1609_TLS_free(void) {
 }
 
-static X509 * X509_new_fake_cert(void) {
+static X509 * X509_new_fake_cert(X509 ** x) {
     X509 * cert = NULL;
 	const unsigned char *p = X509_cert_der;
 
-	cert = d2i_X509(NULL, &p, X509_cert_der_len);
+	cert = d2i_X509(x, &p, X509_cert_der_len);
 	if (cert == NULL) {
         ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return NULL;
@@ -939,8 +939,8 @@ int X509_is_IEEE1609_CERT(X509 * x) {
 	return 0;
 }
 
-X509 * X509_new_IEEE1609_CERT(const unsigned char **ppin, long length) {
-	X509 * ret = NULL;
+X509 * X509_set_IEEE1609_CERT(X509 **x, const unsigned char **ppin, long length) {
+	X509 * ptmpval = NULL;
     IEEE1609_CERT * cert = NULL;
 
     if (g_x509_1609_idx == -1) {
@@ -948,8 +948,12 @@ X509 * X509_new_IEEE1609_CERT(const unsigned char **ppin, long length) {
         return NULL;
     }
 
-    ret = X509_new_fake_cert();
-    if (ret == NULL) {
+    if (x == NULL) {
+        x = &ptmpval;
+    }
+
+    X509_new_fake_cert(x);
+    if (*x == NULL) {
         ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         return NULL;
     }
@@ -957,15 +961,22 @@ X509 * X509_new_IEEE1609_CERT(const unsigned char **ppin, long length) {
     cert = IEEE1609_CERT_new_from_buffer(ppin, length);
     if (cert == NULL) {
         ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
-        return NULL;
+        goto err;
     }
-    if (!X509_set_ex_data(ret, g_x509_1609_idx, cert)) {
+    if (!X509_set_ex_data(*x, g_x509_1609_idx, cert)) {
         ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         IEEE1609_CERT_free(cert);
-        return NULL;
+        goto err;
     }
 
-	return ret;
+	return *x;
+err:
+    X509_free(*x);
+    return NULL;
+}
+
+X509 * X509_new_IEEE1609_CERT(const unsigned char **ppin, long length) {
+    return X509_set_IEEE1609_CERT(NULL, ppin, length);
 }
 
 int X509_append_IEEE1609_CERT_test(X509 * x) {
@@ -1347,7 +1358,7 @@ int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid, unsigned char hash
 		IEEE1609_CERT * cert = NULL;
 		X509 * peer_x = NULL;
 
-		peer_x = SSL_get_peer_certificate(s);
+		peer_x = SSL_get0_peer_certificate(s);
 		if (peer_x == NULL) {
 			ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
 			return 0;

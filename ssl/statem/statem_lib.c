@@ -277,7 +277,9 @@ int tls_construct_cert_verify(SSL *s, WPACKET *pkt)
     unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     const SIGALG_LOOKUP *lu = s->s3.tmp.sigalg;
 
+#ifdef TLS_13_1609_DEBUG
     fprintf(stderr, "server: %d tls_construct_cert_verify\n", SSL_is_server(s));
+#endif
 
     if (lu == NULL || s->s3.tmp.cert == NULL) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
@@ -936,7 +938,9 @@ static int ssl_add_cert_to_wpacket(SSL *s, WPACKET *pkt, X509 *x, int chain)
     unsigned char *outbytes;
 
     // check if we're using 1609 certs
+#ifdef TLS_13_1609_DEBUG
     fprintf(stderr, "server %d using_1609 %d\n", SSL_is_server(s), SSL_is_using_1609_this_side(s));
+#endif
     if (SSL_is_using_1609_this_side(s)) {
         return ssl_add_IEEE1609_CERT_to_wpacket(s, pkt, x, chain);
         /* SSLfatal() already called */
@@ -967,7 +971,9 @@ static int ssl_add_cert_to_wpacket(SSL *s, WPACKET *pkt, X509 *x, int chain)
 static int ssl_add_cert_chain(SSL *s, WPACKET *pkt, CERT_PKEY *cpk)
 {
     // here certs are added to the packet!
+#ifdef TLS_13_1609_DEBUG
     fprintf(stderr, "server: %d ssl_add_cert_chain\n", SSL_is_server(s));
+#endif
     int i, chain_count;
     X509 *x;
     STACK_OF(X509) *extra_certs;
