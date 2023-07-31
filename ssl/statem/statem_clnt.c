@@ -1807,7 +1807,7 @@ MSG_PROCESS_RETURN tls_process_server_certificate(SSL *s, PACKET *pkt)
             goto err;
         }
         if (SSL_is_using_1609_server(s)) {
-            x = X509_new_IEEE1609_CERT((const unsigned char **)&certbytes, cert_len);
+            X509_set_IEEE1609_CERT(&x, (const unsigned char **)&certbytes, cert_len);
         } else {
             d2i_X509(&x, (const unsigned char **)&certbytes, cert_len);
         }
