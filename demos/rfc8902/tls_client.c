@@ -31,9 +31,13 @@ unsigned char __1609dot2_ec_cert_hash[CERT_HASH_LEN] = {
 	0xC4, 0x3B, 0x88, 0xB2, 0x35, 0x81, 0xDD, 0x3B
 };
 uint64_t __1609dot2_psid = 623;
+int set_cert_psid = 0;
+int use_AT_cert = 0;
 
 pid_t server_pid = -1;
 int force_x509 = 0;
+char sec_ent_ip[INET_ADDRSTRLEN] = "127.0.0.1";
+short unsigned int sec_ent_port = 3999;
 char server_ip[INET_ADDRSTRLEN] = "127.0.0.1";
 int do_exit = 0;
 
@@ -132,7 +136,7 @@ int ssl_print_1609_status(SSL *s) {
 		free(ssp);
 		return 0;
 	} else {
-		printf("Peer verification %ld\n", verify_result);
+		printf("Peer verification %ld %s\n", verify_result, verify_result == 0 ? "OK" : "FAIL");
 	}
 
 	printf("Psid used for TLS is %llu\n", psid);
@@ -144,6 +148,44 @@ int ssl_print_1609_status(SSL *s) {
 	printf("\n");
 
 	free(ssp);
+	return 1;
+}
+
+static int ssl_set_RFC8902_values(SSL *ssl, int server_support, int client_support) {
+	if (!SSL_enable_RFC8902_support(ssl, server_support, client_support, use_AT_cert)) {
+		fprintf(stderr, "SSL_enable_RFC8902_support failed\n");
+		ERR_print_errors_fp(stderr);
+		return 0;
+	}
+	if (force_x509) {
+		if (1 != SSL_use_PrivateKey_file(ssl, "client.key.pem", SSL_FILETYPE_PEM)) {
+			fprintf(stderr, "SSL_CTX_use_PrivatKey_file failed: ");
+			ERR_print_errors_fp(stderr);
+			return 0;
+		}
+		if (1 != SSL_use_certificate_file(ssl, "client.cert.pem", SSL_FILETYPE_PEM)) {
+			fprintf(stderr, "SSL_CTX_use_certificate_file failed: ");
+			ERR_print_errors_fp(stderr);
+			return 0;
+		}
+	} else {
+		if (!use_AT_cert) {
+			if (!SSL_use_1609_cert_by_hash(ssl, __1609dot2_ec_cert_hash)) {
+				fprintf(stderr, "SSL_use_1609_cert_by_hash failed\n");
+				ERR_print_errors_fp(stderr);
+				return 0;
+			}
+		} else {
+			printf("Using current AT cert with default PSID\n");
+		}
+		if (set_cert_psid) {
+			if (!SSL_use_1609_PSID(ssl, __1609dot2_psid)) {
+				fprintf(stderr, "SSL_use_1609_PSID failed\n");
+				ERR_print_errors_fp(stderr);
+				return 0;
+			}
+		}
+	}
 	return 1;
 }
 
@@ -269,33 +311,18 @@ void server(int server_port, int test_mode) {
 			fprintf(stderr, "SSL_new failed\n");
 			exit(EXIT_FAILURE);
 		}
-		int server_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
-		if (force_x509) {
-			server_support = SSL_RFC8902_X509;
-		}
-		if (!SSL_enable_RFC8902_support(ssl, server_support,
-		                                SSL_RFC8902_1609 | SSL_RFC8902_X509)) {
-			fprintf(stderr, "SSL_enable_RFC8902_support failed\n");
+		if (!SSL_set_1609_sec_ent_addr(ssl, sec_ent_port, sec_ent_ip)) {
+			fprintf(stderr, "SSL_set_1609_sec_ent_addr failed\n");
 			ERR_print_errors_fp(stderr);
 			exit(EXIT_FAILURE);
 		}
+		int server_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
+		int client_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
 		if (force_x509) {
-			if (1 != SSL_use_PrivateKey_file(ssl, "server.key.pem", SSL_FILETYPE_PEM)) {
-				fprintf(stderr, "SSL_use_PrivateKey_file failed: ");
-				ERR_print_errors_fp(stderr);
-				exit(EXIT_FAILURE);
-			}
-			if (1 != SSL_use_certificate_file(ssl, "server.cert.pem", SSL_FILETYPE_PEM)) {
-				fprintf(stderr, "SSL_use_certificate_file failed: ");
-				ERR_print_errors_fp(stderr);
-				exit(EXIT_FAILURE);
-			}
-		} else {
-			if (!SSL_use_1609_cert_by_hash(ssl, __1609dot2_ec_cert_hash, __1609dot2_psid)) {
-				fprintf(stderr, "SSL_use_1609_cert_by_hash failed\n");
-				ERR_print_errors_fp(stderr);
-				exit(EXIT_FAILURE);
-			}
+			server_support = SSL_RFC8902_X509;
+		}
+		if (!ssl_set_RFC8902_values(ssl, server_support, client_support)) {
+			exit(EXIT_FAILURE);
 		}
 		if (!SSL_set_fd(ssl, client)) {
 			fprintf(stderr, "SSL_set_fd failed\n");
@@ -317,10 +344,9 @@ void server(int server_port, int test_mode) {
 
 		retval = SSL_accept(ssl);
 		if (retval <= 0) {
-			fprintf(stderr, "SSL_accept failed ssl_err=%d errno=%s: ",
+			fprintf(stderr, "SSL_accept failed ssl_err=%d errno=%s\n",
 			        SSL_get_error(ssl, retval), strerror(errno));
 			ERR_print_errors_fp(stderr);
-			fprintf(stderr, "\n");
 			continue;
 		}
 		printf("SSL accepted.\n");
@@ -464,33 +490,18 @@ void client(int server_port, int test_mode) {
         fprintf(stderr, "SSL_new failed\n");
 		terminate();
     }
+	if (!SSL_set_1609_sec_ent_addr(ssl, sec_ent_port, sec_ent_ip)) {
+		fprintf(stderr, "SSL_set_1609_sec_ent_addr failed\n");
+		ERR_print_errors_fp(stderr);
+		exit(EXIT_FAILURE);
+	}
     int server_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
     int client_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
     if (force_x509) {
     	client_support = SSL_RFC8902_X509;
     }
-	if (!SSL_enable_RFC8902_support(ssl, server_support, client_support)) {
-		fprintf(stderr, "SSL_enable_RFC8902_support failed\n");
-		ERR_print_errors_fp(stderr);
+	if (!ssl_set_RFC8902_values(ssl, server_support, client_support)) {
 		exit(EXIT_FAILURE);
-	}
-	if (force_x509) {
-		if (1 != SSL_use_PrivateKey_file(ssl, "client.key.pem", SSL_FILETYPE_PEM)) {
-			fprintf(stderr, "SSL_CTX_use_PrivatKey_file failed: ");
-			ERR_print_errors_fp(stderr);
-			terminate();
-		}
-		if (1 != SSL_use_certificate_file(ssl, "client.cert.pem", SSL_FILETYPE_PEM)) {
-			fprintf(stderr, "SSL_CTX_use_certificate_file failed: ");
-			ERR_print_errors_fp(stderr);
-			terminate();
-		}
-	} else {
-		if (!SSL_use_1609_cert_by_hash(ssl, __1609dot2_ec_cert_hash, __1609dot2_psid)) {
-			fprintf(stderr, "SSL_use_1609_cert_by_hash failed\n");
-			ERR_print_errors_fp(stderr);
-			exit(EXIT_FAILURE);
-		}
 	}
     if (!SSL_set_fd(ssl, client_socket)) {
 		ERR_print_errors_fp(stderr);
@@ -509,6 +520,14 @@ void client(int server_port, int test_mode) {
 
     int send_messages = 1;
     while (send_messages && !do_exit) {
+
+		int ssl_error = SSL_get_error(ssl, processed);
+		ERR_print_errors_fp(stderr);
+		if (ssl_error) {
+			printf("Client thinks a server finished sending data\n");
+			ERR_print_errors_fp(stderr);
+		}
+
 	    printf("input message to server, type exit or ^C to quit, send \"shutdown\" to stop the server\n");
 	    char *line = NULL;
 	    size_t line_len = 0;
@@ -532,7 +551,7 @@ void client(int server_port, int test_mode) {
 	    if (ssl_send_message(ssl, line, line_len) < 0) {
 	    	terminate();
 	    }
-	    if ((processed = ssl_recv_message(ssl, line, line_len)) < 0) {
+	    if ((processed = ssl_recv_message(ssl, line, line_len)) <= 0) {
 		    int ssl_error = SSL_get_error(ssl, processed);
 		    ERR_print_errors_fp(stderr);
 		    if (ssl_error == SSL_ERROR_ZERO_RETURN) {
@@ -617,7 +636,7 @@ int main(int argc, char **argv) {
 	int test = 0;
 	int opt, rc;
 
-	while ((opt = getopt(argc, argv, "p:a:cstxn:b:")) != -1) {
+	while ((opt = getopt(argc, argv, "p:a:cstxn:b:de:f:")) != -1) {
 		switch (opt) {
 		case 'c': start_client = 1; break;
 		case 's': start_server = 1; break;
@@ -639,6 +658,7 @@ int main(int argc, char **argv) {
 				fprintf(stderr, "String-integer conversion error for %s\n", optarg);
 				exit(EXIT_FAILURE);
 			}
+			set_cert_psid = 1;
 			break;
 		case 'b': {
 			const char * pos_str = optarg;
@@ -656,23 +676,49 @@ int main(int argc, char **argv) {
 				pos_hash++;
 				pos_str += 2;
 			}
+			set_cert_psid = 1;
 			}	
+			break;
+		case 'd':
+			use_AT_cert = 1;
+			break;
+		case 'e':
+			strncpy(sec_ent_ip, optarg, INET_ADDRSTRLEN);
+			break;
+		case 'f':
+			rc = sscanf(optarg, "%hu", &sec_ent_port);
+			if (rc < 1) {
+				fprintf(stderr, "String-integer conversion error for %s\n", optarg);
+				exit(EXIT_FAILURE);
+			}
 			break;
 		default:
 			fprintf(stderr, "Usage: %s [-p port] [-c -> client] [-s -> server]\n"
 					"  -t - test mode\n"
 					"  -x - force X509 cert\n"
 					"  -a - server address\n"
+					"  -d - use current AT certificate\n"
 					"  -n PSID - specify PSID value (default %llu)\n"
-					"  -b HASH - specify cert hash to use\n", argv[0], __1609dot2_psid);
+					"  -b HASH - specify cert hash to use\n"
+					"  -e ADDR - sec_ent address \n"
+					"  -f PORT - sec_ent port\n", argv[0], __1609dot2_psid);
 			exit(EXIT_FAILURE);
 		}
 	}
 
 	printf("Using port %hu\n", server_port);
-	printf("Using certificate ");
-	print_hex_array(CERT_HASH_LEN, __1609dot2_ec_cert_hash);
-	printf(" with PSID %llu\n", __1609dot2_psid);
+	printf("Connecting to sec_ent at %s port %hu\n", sec_ent_ip, sec_ent_port);
+	if (use_AT_cert) {
+		printf("Using AT certficate");
+	} else {
+		printf("Using certificate ");
+		print_hex_array(CERT_HASH_LEN, __1609dot2_ec_cert_hash);
+	}
+	if (set_cert_psid) {
+		printf(" with PSID %llu\n", __1609dot2_psid);
+	} else {
+		printf(" with default PSID 36\n");
+	}
 
 	if (!(start_client || start_server)) {
 		test = 1;

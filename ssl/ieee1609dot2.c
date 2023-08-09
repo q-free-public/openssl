@@ -3,6 +3,7 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
+#include <openssl/ssl.h>
 
 #include "ieee1609dot2.h"
 #include "ssl_local.h"
@@ -356,9 +357,6 @@ static unsigned char __1609dot2_at_cert_hash[8] = {
     0xF3, 0xCA, 0xFF, 0x29, 0xD3, 0x5E, 0x0C, 0x1C
 };
 
-#define SEC_ENT_ADDR "127.0.0.1"
-#define SEC_ENT_PORT (3999)
-
 // index in X509 struture ext data
 // see engines/e_capi.c for usage
 static int g_x509_1609_idx = -1;
@@ -374,6 +372,11 @@ static int g_ssl_1609_idx = -1;
 #define SEC_ENT_MSG_TYPE_TLS_VERIFY_CERTS 18
 #define SEC_ENT_MSG_TYPE_TLS_SIGN_DATA 19
 #define SEC_ENT_MSG_TYPE_TLS_VERIFY_DATA 20
+#define SEC_ENT_MSG_TYPE_GET_AT 22
+
+#define PSID_DEFAULT 36
+#define SEC_ENT_ADDR_DEFAULT "127.0.0.1"
+#define SEC_ENT_PORT_DEFAULT 3999
 
 struct sec_ent_msg_st {
 // set contents
@@ -383,6 +386,38 @@ struct sec_ent_msg_st {
 };
 
 typedef struct sec_ent_msg_st SEC_ENT_MSG;
+
+struct ssl_IEEE1609_st {
+    // do we want to allow cert_type extensions?
+    int RFC8902_support;
+
+    RFC8902_CERT_TYPE srv;
+    RFC8902_CERT_TYPE clnt;
+
+    // psid to use when making cert verify
+    uint64_t psid_this_side;
+    uint64_t psid_other_side;
+
+    // SSP mathing cert and PSID used by the other side
+    size_t ssp_other_side_len;
+    uint8_t ssp_other_side[MAX_SSP_LEN];
+
+    // sec_ent connection info
+    char sec_ent_addr[INET_ADDRSTRLEN];
+    int sec_ent_port;
+};
+
+typedef struct ssl_IEEE1609_st SSL_IEEE1609;
+
+struct IEEE1609_cert_st {
+    int version;
+    long cert_data_len;
+    unsigned char *cert_data;
+    int hashed_id_present;
+    uint8_t hashedid8[HASHEDID8_LEN];
+};
+
+typedef struct IEEE1609_cert_st IEEE1609_CERT;
 
 /* Not all platforms have htobe64(). */
 static uint64_t be64(uint64_t host)
@@ -564,6 +599,13 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_TYPE_GET_CERT(
             msg_buff, HASHEDID8_LEN + 1);
 }
 
+static SEC_ENT_MSG * SEC_ENT_MSG_new_TYPE_GET_AT_CERT()
+{
+    return SEC_ENT_MSG_new_from_type_buffer(
+            SEC_ENT_MSG_TYPE_GET_AT,
+            NULL, 0);
+}
+
 static int SEC_ENT_MSG_get_send_buffer(SEC_ENT_MSG * msg,
         unsigned char ** data, size_t * len)
 {
@@ -599,121 +641,6 @@ static void print_buffer(const unsigned char * data, size_t len) {
     }
     fprintf(stderr, "\n");
 }
-
-static int connect_server(void) {
-    struct sockaddr_in servaddr;
-    int sock_fd;
-
-    sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_fd == -1) {
-        ERR_raise(ERR_LIB_SSL, SSL_R_SOCKET_ALLOC_FAILED);
-        return -1;
-    }
-    bzero(&servaddr, sizeof(servaddr));
-
-    // assign IP, PORT
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = inet_addr(SEC_ENT_ADDR);
-    servaddr.sin_port = htons(SEC_ENT_PORT);
-
-    // connect the client socket to server socket
-    if (connect(sock_fd, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0) {
-        ERR_raise(ERR_LIB_SSL, SSL_R_SEC_ENT_CONNECT_FAILED);
-        return -1;
-    }
-
-    return sock_fd;
-}
-
-static SEC_ENT_MSG * send_recv_server(int sock_fd,
-        const unsigned char * out_data, size_t out_len,
-        const unsigned char ** in_data, size_t *in_data_len)
-{
-    unsigned char buff[2048];
-    SEC_ENT_MSG * reply = NULL;
-
-    if (0) {
-        print_buffer(buff, 0);
-    }
-
-#ifdef TLS_13_1609_DEBUG
-    fprintf(stderr, ">>> send_recv_server - request\n");
-    print_buffer(out_data, out_len);
-#endif
-    int write_len = write(sock_fd, out_data, out_len);
-    if (write_len != (int)out_len) {
-        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
-        return NULL;
-    }
-
-    bzero(buff, sizeof(buff));
-    int read_len = read(sock_fd, buff, sizeof(buff));
-    if (read_len > (int)sizeof(buff)) {
-        // TODO: this may be handled in the future
-        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
-        return NULL;
-    }
-#ifdef TLS_13_1609_DEBUG
-    fprintf(stderr, ">>> send_recv_server - reply\n");
-    print_buffer(buff, read_len);
-#endif
-    reply = SEC_ENT_MSG_new_from_recv_buffer(buff, read_len);
-    if (reply == NULL) {
-        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
-        return NULL;
-    }
-    if (reply->msg_type == SEC_ENT_MSG_TYPE_FAILURE) {
-        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
-        ERR_add_error_data(1, reply->data);
-        SEC_ENT_MSG_free(reply);
-        return NULL;
-    }
-    return reply;
-}
-
-static void disconnect_server(int sock_fd) {
-    if (sock_fd > 0) {
-        close(sock_fd);
-        sock_fd = -1;
-    }
-}
-
-static SEC_ENT_MSG * sec_ent_process(SEC_ENT_MSG * msg) {
-    SEC_ENT_MSG * ret = NULL;
-    unsigned char * msg_buff = NULL;
-    size_t len;
-    int sock_fd;
-
-    sock_fd = connect_server();
-    if (sock_fd < 0) {
-        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
-        return NULL;
-    }
-    if (!SEC_ENT_MSG_get_send_buffer(msg, &msg_buff, &len)) {
-        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
-        goto out;
-    }
-    ret = send_recv_server(sock_fd, msg_buff, len, NULL, NULL);
-    if (ret == NULL) {
-        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
-        goto out;
-    }
-
-out:
-    disconnect_server(sock_fd);
-    OPENSSL_free(msg_buff);
-    return ret;
-}
-
-struct IEEE1609_cert_st {
-    int version;
-    long cert_data_len;
-    unsigned char *cert_data;
-    int hashed_id_present;
-    uint8_t hashedid8[HASHEDID8_LEN];
-};
-
-typedef struct IEEE1609_cert_st IEEE1609_CERT;
 
 static IEEE1609_CERT * IEEE1609_CERT_new_from_buffer(const unsigned char ** data, long len) {
     IEEE1609_CERT * cert = NULL;
@@ -797,25 +724,6 @@ static int CRYPTO_EX_IEEE1609_CERT_dup(CRYPTO_EX_DATA *to, const CRYPTO_EX_DATA 
     }
     return 1;
 }
-
-struct ssl_IEEE1609_st {
-    // do we want to allow cert_type extensions?
-    int RFC8902_support;
-
-    RFC8902_CERT_TYPE srv;
-    RFC8902_CERT_TYPE clnt;
-
-    // psid to use when making cert verify
-    uint64_t psid_this_side;
-    uint64_t psid_other_side;
-
-    // SSP mathing cert and PSID used by the other side
-    size_t ssp_other_side_len;
-    uint8_t ssp_other_side[MAX_SSP_LEN];
-};
-
-typedef struct ssl_IEEE1609_st SSL_IEEE1609;
-
 static SSL_IEEE1609 * SSL_get_SSL_IEEE1609(SSL * s) {
     SSL_IEEE1609 * ieee1609_state = NULL;
     ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
@@ -847,9 +755,13 @@ static void CRYPTO_EX_SSL_IEEE1609_new(void *parent, void *ptr, CRYPTO_EX_DATA *
     data->srv.type_decided = -1;
     data->clnt.support = SSL_RFC8902_X509;
     data->clnt.type_decided = -1;
-    data->psid_this_side = 0x00;
+
+    data->psid_this_side = PSID_DEFAULT;
     data->psid_other_side = 0x00;
     data->ssp_other_side_len = 0;
+
+    strncpy(data->sec_ent_addr, SEC_ENT_ADDR_DEFAULT, sizeof(data->sec_ent_addr));
+    data->sec_ent_port = SEC_ENT_PORT_DEFAULT;
 
     CRYPTO_set_ex_data(ad, idx, data);
 }
@@ -1008,7 +920,127 @@ int X509_append_IEEE1609_CERT_test(X509 * x) {
     return 1;
 }
 
-int IEEE1609_CERT_verify(X509 * x) {
+static int connect_server(SSL *s) {
+    struct sockaddr_in servaddr;
+    int sock_fd;
+    SSL_IEEE1609 * ieee1609_state = NULL;
+
+    sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock_fd == -1) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_SOCKET_ALLOC_FAILED);
+        return -1;
+    }
+    bzero(&servaddr, sizeof(servaddr));
+
+	ieee1609_state = SSL_get_SSL_IEEE1609(s);
+
+    // assign IP, PORT
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = inet_addr(ieee1609_state->sec_ent_addr);
+    servaddr.sin_port = htons(ieee1609_state->sec_ent_port);
+
+    // connect the client socket to server socket
+    if (connect(sock_fd, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_SEC_ENT_CONNECT_FAILED);
+        return -1;
+    }
+
+    return sock_fd;
+}
+
+static SEC_ENT_MSG * send_recv_server(int sock_fd,
+        const unsigned char * out_data, size_t out_len,
+        const unsigned char ** in_data, size_t *in_data_len)
+{
+    unsigned char buff[2048];
+    SEC_ENT_MSG * reply = NULL;
+
+    if (0) {
+        print_buffer(buff, 0);
+    }
+
+#ifdef TLS_13_1609_DEBUG
+    fprintf(stderr, ">>> send_recv_server - request\n");
+    print_buffer(out_data, out_len);
+#endif
+    int write_len = write(sock_fd, out_data, out_len);
+    if (write_len != (int)out_len) {
+        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Unable to write to security-entity server");
+        return NULL;
+    }
+
+    bzero(buff, sizeof(buff));
+    int read_len = read(sock_fd, buff, sizeof(buff));
+    if (read_len > (int)sizeof(buff)) {
+        // TODO: this may be handled in the future
+        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Unable to read from security-entity server");
+        return NULL;
+    }
+#ifdef TLS_13_1609_DEBUG
+    fprintf(stderr, ">>> send_recv_server - reply\n");
+    print_buffer(buff, read_len);
+#endif
+    reply = SEC_ENT_MSG_new_from_recv_buffer(buff, read_len);
+    if (reply == NULL) {
+        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Unable to read a message from the buffer (len received %d)", read_len);
+        return NULL;
+    }
+    if (reply->msg_type == SEC_ENT_MSG_TYPE_FAILURE) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_UNEXPECTED_MESSAGE);
+        // if err string ends with \n change it to \0
+        if (reply->data[reply->len - 1] == '\n') {
+            reply->data[reply->len - 1] = '\0';
+            ERR_add_error_data(1, reply->data);
+        } else {
+            char * reply_str = OPENSSL_malloc(reply->len + 1);
+            if (reply_str != NULL) {
+                memcpy(reply_str, reply->data, reply->len);
+                reply_str[reply->len] = '\0';
+                ERR_add_error_data(1, reply_str);
+                OPENSSL_free(reply_str);
+            }
+        }
+        SEC_ENT_MSG_free(reply);
+        return NULL;
+    }
+    return reply;
+}
+
+static void disconnect_server(int sock_fd) {
+    if (sock_fd > 0) {
+        close(sock_fd);
+        sock_fd = -1;
+    }
+}
+
+static SEC_ENT_MSG * sec_ent_process(SSL *s, SEC_ENT_MSG * msg) {
+    SEC_ENT_MSG * ret = NULL;
+    unsigned char * msg_buff = NULL;
+    size_t len;
+    int sock_fd;
+
+    sock_fd = connect_server(s);
+    if (sock_fd < 0) {
+        // ERR raised already
+        return NULL;
+    }
+    if (!SEC_ENT_MSG_get_send_buffer(msg, &msg_buff, &len)) {
+        // ERR raised already
+        goto out;
+    }
+    ret = send_recv_server(sock_fd, msg_buff, len, NULL, NULL);
+    if (ret == NULL) {
+        // ERR raised already
+        goto out;
+    }
+
+out:
+    disconnect_server(sock_fd);
+    OPENSSL_free(msg_buff);
+    return ret;
+}
+
+int IEEE1609_CERT_verify(SSL *s, X509 * x) {
     IEEE1609_CERT * cert = NULL;
     SEC_ENT_MSG * msg = NULL;
     SEC_ENT_MSG * reply = NULL;
@@ -1027,7 +1059,7 @@ int IEEE1609_CERT_verify(X509 * x) {
         ret = 0;
         goto out;
     }
-    reply = sec_ent_process(msg);
+    reply = sec_ent_process(s, msg);
     if (reply == NULL) {
         ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         ret = 0;
@@ -1123,7 +1155,7 @@ int tls_construct_IEEE1609_CERT_cert_verify(SSL *s, WPACKET *pkt, X509* x,
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
     }
-    reply = sec_ent_process(msg);
+    reply = sec_ent_process(s, msg);
     if (reply == NULL) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
@@ -1189,9 +1221,13 @@ int tls_process_IEEE1609_CERT_cert_verify(SSL *s, X509 * x,
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
     }
-    reply = sec_ent_process(msg);
+    reply = sec_ent_process(s, msg);
     if (reply == NULL) {
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        if (ERR_GET_REASON(ERR_peek_last_error()) == SSL_R_UNEXPECTED_MESSAGE) {
+            SSLfatal(s, SSL_AD_INSUFFICIENT_SECURITY, SSL_R_CERTIFICATE_VERIFY_FAILED);    
+        } else {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        }
         goto err;
     }
     if (reply->msg_type != SEC_ENT_MSG_TYPE_TLS_VERIFY_DATA) {
@@ -1240,15 +1276,11 @@ err:
     return 0;
 }
 
-int SSL_use_1609_cert(SSL *s, const unsigned char * data, size_t len, uint64_t psid)
+int SSL_use_1609_cert(SSL *s, const unsigned char * data, size_t len)
 {
     const unsigned char *p = data;
     X509 *cert = NULL;
     int ret = 0;
-	SSL_IEEE1609 * ieee1609_state = NULL;
-
-	ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
-	ieee1609_state->psid_this_side = psid;
 
     cert = X509_new_IEEE1609_CERT(&p, len);
     if (cert == NULL) {
@@ -1256,7 +1288,7 @@ int SSL_use_1609_cert(SSL *s, const unsigned char * data, size_t len, uint64_t p
         return 0;
     }
     // get hash for the certificate from buffer
-    if (!IEEE1609_CERT_verify(cert)) {
+    if (!IEEE1609_CERT_verify(s, cert)) {
         ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         goto out;
     }
@@ -1266,7 +1298,17 @@ out:
     return ret;
 }
 
-int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[8], uint64_t psid)
+int SSL_use_1609_PSID(SSL *s, uint64_t psid)
+{
+	SSL_IEEE1609 * ieee1609_state = NULL;
+
+	ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
+	ieee1609_state->psid_this_side = psid;
+
+    return 1;
+}
+
+int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[8])
 {
     X509 *cert_x = NULL;
     IEEE1609_CERT * cert_1609 = NULL;
@@ -1274,10 +1316,6 @@ int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[8], uint64_t 
     SEC_ENT_MSG * msg = NULL;
     SEC_ENT_MSG * reply = NULL;
     const unsigned char *p = NULL;
-	SSL_IEEE1609 * ieee1609_state = NULL;
-
-	ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
-	ieee1609_state->psid_this_side = psid;
 
     msg = SEC_ENT_MSG_new_TYPE_GET_CERT(hashedid);
     if (msg == NULL) {
@@ -1285,7 +1323,7 @@ int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[8], uint64_t 
         goto out;
     }
 
-    reply = sec_ent_process(msg);
+    reply = sec_ent_process(s, msg);
     if (reply == NULL) {
         ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
         goto out;
@@ -1336,20 +1374,88 @@ out:
     return ret;
 }
 
-int SSL_is_RFC8902_supported(SSL * s) {
+int SSL_is_RFC8902_supported(SSL * s) 
+{
     SSL_IEEE1609 * ieee1609_state = NULL;
 
     ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
     return ieee1609_state->RFC8902_support;
 }
 
-int SSL_enable_RFC8902_support(SSL *s, int server_support, int client_support) {
+int sec_ent_initial_connection(SSL *s, int use_AT) 
+{
+    SEC_ENT_MSG * msg = NULL;
+    SEC_ENT_MSG * reply = NULL;
+    const unsigned char *p = NULL;
+    int ret = 0;
+    unsigned char hashedid[8];
+
+    msg = SEC_ENT_MSG_new_TYPE_GET_AT_CERT();
+    if (msg == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+        goto out;
+    }
+
+    reply = sec_ent_process(s, msg);
+    if (reply == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+        goto out;
+    }
+
+    if (reply->msg_type != SEC_ENT_MSG_TYPE_GET_AT) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+#ifdef TLS_13_1609_DEBUG
+        fprintf(stderr,
+            ">>> sec_ent_test_connection something went wrong reply %d\n",
+            reply->msg_type);
+        print_buffer(reply->data, reply->len);
+#endif
+        goto out;
+    }
+
+    if (use_AT) {
+        p = (const unsigned char *)reply->data;
+        if (reply->len < sizeof(hashedid)) {
+            ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+            goto out;
+        }
+        memcpy(hashedid, p, sizeof(hashedid));
+        if (!SSL_use_1609_cert_by_hash(s, hashedid)) {
+            ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+            goto out;
+        }
+    }
+    ret = 1;
+
+out:
+    SEC_ENT_MSG_free(msg);
+    SEC_ENT_MSG_free(reply);
+    return ret;
+
+}
+
+int SSL_enable_RFC8902_support(SSL *s, int server_support, int client_support, int use_AT) {
     SSL_IEEE1609 * ieee1609_state = NULL;
 
     ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
     ieee1609_state->RFC8902_support = 1;
     ieee1609_state->srv.support = server_support;
     ieee1609_state->clnt.support = client_support;
+
+    // TODO: here we may be enabling AT usage even if "our" side doesn't support 1609 certs
+    if (server_support & SSL_RFC8902_1609 || client_support & SSL_RFC8902_1609) {
+        return sec_ent_initial_connection(s, use_AT);
+    }
+
+    return 1;
+}
+
+int SSL_set_1609_sec_ent_addr(SSL *s, int port, const char* addr) {
+    SSL_IEEE1609 * ieee1609_state = NULL;
+
+    ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
+    strncpy(ieee1609_state->sec_ent_addr, addr, sizeof(ieee1609_state->sec_ent_addr));
+    ieee1609_state->sec_ent_port = port;
 
     return 1;
 }

@@ -405,7 +405,7 @@ int ssl_verify_cert_chain(SSL *s, STACK_OF(X509) *sk)
     x = sk_X509_value(sk, 0);
     if (X509_is_IEEE1609_CERT(x)) {
         //TODO: maybe call verification on a chain in a proper way - not just first cert?
-        i = IEEE1609_CERT_verify(x);
+        i = IEEE1609_CERT_verify(s, x);
         if (!i) {
         	SSLerr(SSL_F_SSL_VERIFY_CERT_CHAIN, ERR_R_INTERNAL_ERROR);
         }

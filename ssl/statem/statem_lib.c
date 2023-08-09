@@ -433,8 +433,8 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL *s, PACKET *pkt)
     // TODO: is this flow correct for 1609.2 ?
     if (SSL_is_using_1609_other_side(s)) {
 
-        if (!IEEE1609_CERT_verify(peer)) {
-            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        if (!IEEE1609_CERT_verify(s, peer)) {
+            SSLfatal(s, SSL_AD_INSUFFICIENT_SECURITY, ERR_R_INTERNAL_ERROR);
             goto err;
         }
         len = (int)PACKET_remaining(pkt);

@@ -39,7 +39,7 @@ void IEEE1609_TLS_init(void);
 void IEEE1609_TLS_free(void);
 
 // Verify 1609.2 certificate from X509 struct
-int IEEE1609_CERT_verify(X509 * x);
+int IEEE1609_CERT_verify(SSL *s, X509 * x);
 
 // Are we using 1609 for client / server authentication
 int SSL_is_using_1609_client(SSL *s);
