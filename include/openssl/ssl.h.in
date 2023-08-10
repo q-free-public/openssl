@@ -2528,13 +2528,15 @@ const char *OSSL_default_ciphersuites(void);
 // X.509
 #define SSL_RFC8902_X509 0x02
 
-int SSL_use_1609_cert(SSL *s, const unsigned char * data, size_t len, uint64_t psid);
-int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[8], uint64_t psid);
+int SSL_use_1609_cert(SSL *s, const unsigned char * data, size_t len);
+int SSL_use_1609_PSID(SSL *s, uint64_t psid);
+int SSL_use_1609_cert_by_hash(SSL *s, const unsigned char hashedid[8]);
 // support is bitmap of SSL_RFC8902...
-int SSL_enable_RFC8902_support(SSL *s, int server_support, int client_support);
+int SSL_enable_RFC8902_support(SSL *s, int server_support, int client_support, int use_AT);
 int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid, 
                                size_t * const ssp_len, uint8_t ** const ssp,
                                unsigned char hashedid[8]);
+int SSL_set_1609_sec_ent_addr(SSL *s, int port, const char* addr);
 
 # ifdef  __cplusplus
 }
