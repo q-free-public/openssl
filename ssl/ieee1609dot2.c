@@ -1454,7 +1454,7 @@ int SSL_set_1609_sec_ent_addr(SSL *s, int port, const char* addr) {
     SSL_IEEE1609 * ieee1609_state = NULL;
 
     ieee1609_state = SSL_get_ex_data(s, g_ssl_1609_idx);
-    strncpy(ieee1609_state->sec_ent_addr, addr, sizeof(ieee1609_state->sec_ent_addr));
+    strncpy(ieee1609_state->sec_ent_addr, addr, sizeof(ieee1609_state->sec_ent_addr) - 1);
     ieee1609_state->sec_ent_port = port;
 
     return 1;
