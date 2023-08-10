@@ -599,7 +599,7 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_TYPE_GET_CERT(
             msg_buff, HASHEDID8_LEN + 1);
 }
 
-static SEC_ENT_MSG * SEC_ENT_MSG_new_TYPE_GET_AT_CERT()
+static SEC_ENT_MSG * SEC_ENT_MSG_new_TYPE_GET_AT_CERT(void)
 {
     return SEC_ENT_MSG_new_from_type_buffer(
             SEC_ENT_MSG_TYPE_GET_AT,
@@ -1382,7 +1382,7 @@ int SSL_is_RFC8902_supported(SSL * s)
     return ieee1609_state->RFC8902_support;
 }
 
-int sec_ent_initial_connection(SSL *s, int use_AT) 
+static int sec_ent_initial_connection(SSL *s, int use_AT) 
 {
     SEC_ENT_MSG * msg = NULL;
     SEC_ENT_MSG * reply = NULL;

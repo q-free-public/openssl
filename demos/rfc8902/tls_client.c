@@ -175,8 +175,6 @@ static int ssl_set_RFC8902_values(SSL *ssl, int server_support, int client_suppo
 				ERR_print_errors_fp(stderr);
 				return 0;
 			}
-		} else {
-			printf("Using current AT cert with default PSID\n");
 		}
 		if (set_cert_psid) {
 			if (!SSL_use_1609_PSID(ssl, __1609dot2_psid)) {
