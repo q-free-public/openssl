@@ -505,13 +505,17 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_from_recv_buffer(
         ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
         return NULL;
     }
-    if (len == 0) {
+    if (len <= 5) { // There must be a header of the sec_ent msg
         ERR_raise(ERR_LIB_SSL, SSL_R_BAD_DATA);
         goto err;
     }
     msg->msg_type = data[0];
     memcpy(&msg->len, &data[1], sizeof(msg->len));
     msg->len = ntohl(msg->len);
+    if (msg->len + 5 != len) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_BAD_DATA);
+        goto err;
+    }
     if (msg->len == 0) {
         msg->data = NULL;
     } else {
