@@ -1,3 +1,9 @@
+## Compilation of openssl
+! It is essential to run `make update` before running `make`. This causes changes in `include/ssl.h.in` to be transfered to `ssl.h`
+```
+make update
+make
+```
 ## Wireshark decryption
 
 See https://wiki.wireshark.org/TLS#Using_the_.28Pre.29-Master-Secret
