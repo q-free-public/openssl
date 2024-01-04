@@ -495,6 +495,22 @@ static void SEC_ENT_MSG_free(SEC_ENT_MSG * msg) {
     }
 }
 
+static ssize_t SEC_ENT_MSG_parse_len_from_hdr_buffer(
+    const unsigned char * data, size_t len)
+{
+    if (len < SEC_ENT_MSG_HDR_LEN) { // There must be a header of the sec_ent msg
+        ERR_raise(ERR_LIB_SSL, SSL_R_BAD_DATA);
+        return -1;
+    }
+
+    SEC_ENT_MSG msg;
+    msg.msg_type = data[0];
+    memcpy(&msg.len, &data[1], sizeof(msg.len));
+    msg.len = ntohl(msg.len);
+
+    return msg.len;
+}
+
 static SEC_ENT_MSG * SEC_ENT_MSG_new_from_recv_buffer(
         const unsigned char * data, size_t len)
 {
@@ -505,14 +521,14 @@ static SEC_ENT_MSG * SEC_ENT_MSG_new_from_recv_buffer(
         ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
         return NULL;
     }
-    if (len <= 5) { // There must be a header of the sec_ent msg
+    if (len <= SEC_ENT_MSG_HDR_LEN) { // There must be a header of the sec_ent msg
         ERR_raise(ERR_LIB_SSL, SSL_R_BAD_DATA);
         goto err;
     }
     msg->msg_type = data[0];
     memcpy(&msg->len, &data[1], sizeof(msg->len));
     msg->len = ntohl(msg->len);
-    if (msg->len + 5 != len) {
+    if (msg->len + SEC_ENT_MSG_HDR_LEN != len) {
         ERR_raise(ERR_LIB_SSL, SSL_R_BAD_DATA);
         goto err;
     }
@@ -952,6 +968,20 @@ static int connect_server(SSL *s) {
     return sock_fd;
 }
 
+static ssize_t read_N_bytes(int sock_fd, size_t bytes_to_read, unsigned char ** buffer) {
+    ssize_t ret = 0;
+    while (bytes_to_read > 0 && ret >= 0) {
+        int read_len = read(sock_fd, *buffer, bytes_to_read);
+        if (read_len <= 0) {
+            return read_len;
+        }
+        bytes_to_read -= read_len;
+        *buffer += read_len;
+        ret += read_len;
+    }
+    return ret;
+}
+
 static SEC_ENT_MSG * send_recv_server(int sock_fd,
         const unsigned char * out_data, size_t out_len,
         const unsigned char ** in_data, size_t *in_data_len)
@@ -967,26 +997,52 @@ static SEC_ENT_MSG * send_recv_server(int sock_fd,
     fprintf(stderr, ">>> send_recv_server - request\n");
     print_buffer(out_data, out_len);
 #endif
-    int write_len = write(sock_fd, out_data, out_len);
-    if (write_len != (int)out_len) {
-        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Unable to write to security-entity server");
-        return NULL;
+    int bytes_to_write = out_len;
+    while (bytes_to_write > 0) {
+        int write_len = write(sock_fd, out_data, bytes_to_write);
+        if (write_len <= 0 ) {
+            ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Unable to write to security-entity server");
+            return NULL;
+        }
+        bytes_to_write -= write_len;
+        out_data += write_len;
     }
 
     bzero(buff, sizeof(buff));
-    int read_len = read(sock_fd, buff, sizeof(buff));
-    if (read_len > (int)sizeof(buff)) {
+    unsigned char * read_ptr = buff;
+
+    ssize_t bytes_read = read_N_bytes(sock_fd, SEC_ENT_MSG_HDR_LEN, &read_ptr);
+    if (bytes_read <= 0) {
         // TODO: this may be handled in the future
-        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Unable to read from security-entity server");
+        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Unable to read header from security-entity server");
         return NULL;
     }
+    // header is now read
+
+    ssize_t msg_len = SEC_ENT_MSG_parse_len_from_hdr_buffer(buff, bytes_read);
+    if (msg_len < 0) {
+        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Too large message length security-entity server (len: %d)", msg_len);
+        return NULL;
+    }
+    if ((msg_len + SEC_ENT_MSG_HDR_LEN) > sizeof(buff)) {
+        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Too large message from security-entity server (len: %d)", msg_len);
+        return NULL;
+    }
+    bytes_read = read_N_bytes(sock_fd, msg_len, &read_ptr);
+    if (bytes_read <= 0) {
+        // TODO: this may be handled in the future
+        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Unable to read contents from security-entity server");
+        return NULL;
+    }
+    // message is now read
+
 #ifdef TLS_13_1609_DEBUG
     fprintf(stderr, ">>> send_recv_server - reply\n");
-    print_buffer(buff, read_len);
+    print_buffer(buff, (bytes_read + SEC_ENT_MSG_HDR_LEN));
 #endif
-    reply = SEC_ENT_MSG_new_from_recv_buffer(buff, read_len);
+    reply = SEC_ENT_MSG_new_from_recv_buffer(buff, bytes_read + SEC_ENT_MSG_HDR_LEN);
     if (reply == NULL) {
-        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Unable to read a message from the buffer (len received %d)", read_len);
+        ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Unable to read a message from the buffer (len received %d)", (bytes_read + SEC_ENT_MSG_HDR_LEN));
         return NULL;
     }
     if (reply->msg_type == SEC_ENT_MSG_TYPE_FAILURE) {
