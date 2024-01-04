@@ -3,7 +3,7 @@ OPENSSL_DIR=../..
 all: tls_client
 
 tls_client: tls_client.c
-	$(CC) -g -I$(OPENSSL_DIR)/include -L$(OPENSSL_DIR) \
+	$(CC) -g -I$(OPENSSL_DIR)/include -L$(OPENSSL_DIR) -Wl,-rpath=$(OPENSSL_DIR) \
 	-o $@ $< -lssl -lcrypto
 
 client_cert:
