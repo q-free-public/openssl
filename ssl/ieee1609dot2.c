@@ -1025,7 +1025,7 @@ static SEC_ENT_MSG * send_recv_server(int sock_fd,
         ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Too large message length security-entity server (len: %d)", msg_len);
         return NULL;
     }
-    if ((msg_len + SEC_ENT_MSG_HDR_LEN) > sizeof(buff)) {
+    if ((size_t)(msg_len + SEC_ENT_MSG_HDR_LEN) > sizeof(buff)) {
         ERR_raise_data(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR, "Too large message from security-entity server (len: %d)", msg_len);
         return NULL;
     }
