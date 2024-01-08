@@ -962,6 +962,7 @@ static int connect_server(SSL *s) {
     // connect the client socket to server socket
     if (connect(sock_fd, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0) {
         ERR_raise(ERR_LIB_SSL, SSL_R_SEC_ENT_CONNECT_FAILED);
+        close(sock_fd);
         return -1;
     }
 
