@@ -1642,7 +1642,7 @@ int SSL_get_1609_cert_chain(SSL *s, const unsigned char *hashedid, ssl_1609_cert
     const unsigned char *p = NULL;
     int ret = 0;
 
-    ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain ENTER");
+    //ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain ENTER");
     if (info_size_in_bytes < sizeof(ssl_1609_cert_info_t)) {
        ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain buffer too small");
        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
