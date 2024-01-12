@@ -662,6 +662,24 @@ static void print_buffer(const unsigned char * data, size_t len) {
     fprintf(stderr, "\n");
 }
 
+static void print_buffer_ex(const unsigned char * data, size_t len) {
+    fprintf(stderr, ">>> Buffer len[%zu] \n", len);
+    for (int st = 0; st < (int)len; st+=20) {
+        for (int i = st; i < (int)len && i<st+20; i++) {
+           fprintf(stderr, "%02x ", ((unsigned char *) data)[i]);
+        }
+        for (int i = len; i<st+20; i++) {
+           fprintf(stderr, "   ");
+        }
+        fprintf(stderr, "   ");
+        for (int i = st; i < (int)len && i<st+20; i++) {
+           fprintf(stderr, "%c", data[i]>=' '&&data[i]<='z' ? data[i] : '.');
+        }
+        fprintf(stderr, "\n");
+    }
+    fprintf(stderr, "\n");
+}
+
 static IEEE1609_CERT * IEEE1609_CERT_new_from_buffer(const unsigned char ** data, long len) {
     IEEE1609_CERT * cert = NULL;
 
@@ -1572,3 +1590,183 @@ err:
     return 0;
 
 }
+
+static void ola(const char*fn,int ln,const char*txt) {
+    printf("File %s   line %d   %s\n", fn, ln, txt);
+}
+
+// UTC(2004.01.01) + LEAP(2004.01.01)
+#define EPOCH_TO_TAI_EPOCH_SEC        1072915232L
+
+static time_t ssl_time32_to_time_t(long start, int dur_type, int dur_cnt)
+{
+   start += EPOCH_TO_TAI_EPOCH_SEC;
+
+   switch (dur_type) {
+      case 0: // microsec - not fully supported
+              return start + 1;
+      case 1: // millisec - not fully supported
+              return start + 1;
+      case 2: // seconds
+              return start + dur_cnt;
+      case 3: // minutes
+              return start + dur_cnt * 60;
+      case 4: // hours
+              return start + dur_cnt * 60 * 60;
+      case 5: // sixty_hours
+              return start + dur_cnt * 60 * 60 * 60;
+      case 6: // years
+              return start + dur_cnt * 31556952L;
+      default:
+              return start + 1;
+   }
+
+   return start + 1;
+}
+
+static const char* ssl_time32_to_string(long start, int dur_type, int dur_cnt, char *str)
+{
+    time_t t = ssl_time32_to_time_t(start, dur_type, dur_cnt);
+    struct tm tm = *gmtime(&t);
+    sprintf(str, "%04d-%02d-%02d", tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday);
+    return str;
+}
+
+int SSL_get_1609_cert_chain(SSL *s, const unsigned char *hashedid, ssl_1609_cert_info_t *info, int info_size_in_bytes)
+{
+    X509 *cert_x = NULL;
+    IEEE1609_CERT * cert_1609 = NULL;
+    SEC_ENT_MSG * msg = NULL;
+    SEC_ENT_MSG * reply = NULL;
+    const unsigned char *p = NULL;
+    int ret = 0;
+
+    ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain ENTER");
+    if (info_size_in_bytes < sizeof(ssl_1609_cert_info_t)) {
+       ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain buffer too small");
+       ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+       goto out;
+    }
+
+    //print_buffer_ex(hashedid, HASHEDID8_LEN);
+    memset(info, 0, info_size_in_bytes);  // A little bit of redundant work is done here.
+    memcpy(info->hashedid, hashedid, HASHEDID8_LEN);
+
+    msg = SEC_ENT_MSG_new_TYPE_GET_CERT(hashedid);
+    if (msg == NULL) {
+        ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain mem err");
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+        goto out;
+    }
+
+    reply = sec_ent_process(s, msg);
+    if (reply == NULL) {
+        ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain comm err");
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+        goto out;
+    }
+
+    if (reply->msg_type != SEC_ENT_MSG_TYPE_GET_CERT) {
+        ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain reply err");
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+#ifdef TLS_13_1609_DEBUG
+        fprintf(stderr, ">>> SSL_use_1609_cert_by_hash something went wrong reply %d\n", reply->msg_type);
+        print_buffer(reply->data, reply->len);
+#endif
+        goto out;
+    }
+
+    p = (const unsigned char *)reply->data;
+    // last byte is presence of verification status - we didn't ask for it
+    cert_x = X509_new_IEEE1609_CERT(&p, reply->len - 1);
+    if (cert_x == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+        goto out;
+    }
+
+    cert_1609 = IEEE1609_CERT_from_X509(cert_x);
+    if (cert_1609 == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+        goto out;
+    }
+
+    // set hashedid
+    cert_1609->hashed_id_present = 1;
+    memcpy(cert_1609->hashedid8, hashedid, HASHEDID8_LEN);
+    info->valid = 1;
+
+    //ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain reply success");
+    //print_buffer(cert_1609->cert_data, cert_1609->cert_data_len);
+
+    if (1) {
+       // Decode cert and recurse
+
+       int name_len = 0;
+       const char *name = 0;
+       int dur_type = 0;
+       int dur_cnt = 0;
+       long start = 0;
+       char szStart[50], szEnd[50];
+
+       p = cert_1609->cert_data;
+       if (p[0] == 0x80 && p[1] == 0x03 && p[2] == 0x00 && p[3] == 0x80) {
+          // We have cert (vsn=3) with type=explicit(0)  AT
+          const unsigned char *issuer_hash = p+4;
+          if (p[23] >= 0x81 && p[23] <= 0x86) {
+             dur_type = p[23] & 0x0f;
+             dur_cnt = p[24] * 256 + p[25];
+             start = (unsigned long)p[19] * 256*256*256 + p[20]*256*256 + p[21]*256 + p[22];
+             ssl_time32_to_string(start, 0, 0, szStart);
+             ssl_time32_to_string(start, dur_type, dur_cnt, szEnd);
+             //printf("Validity: %s   %s\n", szStart, szEnd);
+             strncpy(info->valid_from, szStart, sizeof(info->valid_from));
+             strncpy(info->valid_to, szEnd, sizeof(info->valid_to));
+          }
+          ret = SSL_get_1609_cert_chain(s, issuer_hash, info+1, info_size_in_bytes - sizeof(*info));
+       } else if (p[0] == 0x80 && p[1] == 0x03 && p[2] == 0x00 && p[3] == 0x82 && p[4] == 0x08) {
+          // We have cert (vsn=3) with type=explicit(0)  AA
+          const unsigned char *issuer_hash = p+5;
+          name_len = p[15];
+          name = (const char*) p+16;
+          //printf("id.name: %.*s\n", name_len, name);
+          if (name_len >= sizeof(info->id_name)-1) name_len = sizeof(info->id_name)-1;
+          strncpy(info->id_name, name, name_len);
+          if (p[25+name_len] >= 0x81 && p[25+name_len] <= 0x86) {
+             dur_type = p[25+name_len] & 0x0f;
+             dur_cnt = p[26+name_len] * 256 + p[27+name_len];
+             start = (time_t)p[21+name_len] * 256*256*256 + p[22+name_len]*256*256 + p[23+name_len]*256 + p[24+name_len];
+             ssl_time32_to_string(start, 0, 0, szStart);
+             ssl_time32_to_string(start, dur_type, dur_cnt, szEnd);
+             //printf("Validity: %s   %s\n", szStart, szEnd);
+             strncpy(info->valid_from, szStart, sizeof(info->valid_from));
+             strncpy(info->valid_to, szEnd, sizeof(info->valid_to));
+          }
+          ret = SSL_get_1609_cert_chain(s, issuer_hash, info+1, info_size_in_bytes - sizeof(*info));
+       } else if (p[0] == 0x80 && p[1] == 0x03 && p[2] == 0x00 && p[3] == 0x81 && p[4] == 0x01) {
+          // We have cert (vsn=3) with type=explicit(0)  ROOT
+          name_len = p[7];
+          name = (const char*) p+8;
+          //printf("id.name: %.*s\n", name_len, name);
+          if (name_len >= sizeof(info->id_name)-1) name_len = sizeof(info->id_name)-1;
+          strncpy(info->id_name, name, name_len);
+          if (p[17+name_len] >= 0x81 && p[17+name_len] <= 0x86) {
+             dur_type = p[17+name_len] & 0x0f;
+             dur_cnt = p[18+name_len] * 256 + p[19+name_len];
+             start = (time_t)p[13+name_len] * 256*256*256 + p[14+name_len]*256*256 + p[15+name_len]*256 + p[16+name_len];
+             ssl_time32_to_string(start, 0, 0, szStart);
+             ssl_time32_to_string(start, dur_type, dur_cnt, szEnd);
+             //printf("Validity: %s   %s\n", szStart, szEnd);
+             strncpy(info->valid_from, szStart, sizeof(info->valid_from));
+             strncpy(info->valid_to, szEnd, sizeof(info->valid_to));
+          }
+          ret = 1;
+       }
+    }
+
+out:
+    X509_free(cert_x);
+    SEC_ENT_MSG_free(msg);
+    SEC_ENT_MSG_free(reply);
+    return ret;
+}
+
