@@ -1536,7 +1536,9 @@ int SSL_set_1609_sec_ent_addr(SSL *s, int port, const char* addr) {
     strncpy(ieee1609_state->sec_ent_addr, addr, sizeof(ieee1609_state->sec_ent_addr) - 1);
     ieee1609_state->sec_ent_port = port;
 
-    return 1;
+    // check if sec-ent is up
+    return sec_ent_initial_connection(s, 0);
+
 }
 
 int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid,
