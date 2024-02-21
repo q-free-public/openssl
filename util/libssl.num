@@ -526,3 +526,4 @@ SSL_enable_RFC8902_support              ?	3_1_1	EXIST::FUNCTION:
 SSL_get_1609_psid_received              ?	3_1_1	EXIST::FUNCTION:
 SSL_set_1609_sec_ent_addr               ?	3_1_1	EXIST::FUNCTION:
 SSL_use_1609_PSID                       ?	3_1_1	EXIST::FUNCTION:
+SSL_get_1609_cert_chain                 ?	3_1_1	EXIST::FUNCTION:

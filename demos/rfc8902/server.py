@@ -25,6 +25,9 @@ class MessageFactory:
 
 	def parse_Message(self, conn):
 		hdr = conn.recv(5)
+		print(f"Received {hdr}")
+		if len(hdr) == 0:
+			return None
 		hdr_parsed = struct.unpack('>BL', hdr)
 		print(hdr_parsed)
 		type = hdr_parsed[0]
@@ -152,6 +155,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 	s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 	s.bind((HOST, PORT))
 	s.listen()
+	print(f"Listening for connections on {HOST} port {PORT}")
 	while True:
 		conn = None
 		try:
@@ -160,12 +164,11 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 			with conn:
 				print(f"Connected by {addr}")
 				msg = factory.parse_Message(conn)
-				msg.print()
-				if not msg:
-					break
-				print(f'Response = {msg.response_message()}')
-				conn.sendall(msg.response_message())
-				print("Response sent")
+				if msg:
+					msg.print()
+					print(f'Response = {msg.response_message()}')
+					conn.sendall(msg.response_message())
+					print("Response sent")
 				conn.close()
 
 		except KeyboardInterrupt:

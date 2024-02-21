@@ -2538,6 +2538,17 @@ int SSL_get_1609_psid_received(SSL *s, uint64_t * const psid,
                                unsigned char hashedid[8]);
 int SSL_set_1609_sec_ent_addr(SSL *s, int port, const char* addr);
 
+// Get IEEE 1609 certificate chain from a hash
+typedef struct ssl_1609_cert_info_s {
+   int           valid;        // 0 = record is invalid
+   unsigned char hashedid[8];  // HASHEDID8_LEN
+   char          id_name[64];
+   char          valid_from[64];
+   char          valid_to[64];
+} ssl_1609_cert_info_t;
+
+int SSL_get_1609_cert_chain(SSL *s, const unsigned char *cert_hashed_id, ssl_1609_cert_info_t *info, int info_size_in_bytes);
+
 # ifdef  __cplusplus
 }
 # endif
