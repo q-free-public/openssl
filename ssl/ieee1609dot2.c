@@ -662,6 +662,7 @@ static void print_buffer(const unsigned char * data, size_t len) {
     fprintf(stderr, "\n");
 }
 
+#if 0
 static void print_buffer_ex(const unsigned char * data, size_t len) {
     fprintf(stderr, ">>> Buffer len[%zu] \n", len);
     for (int st = 0; st < (int)len; st+=20) {
@@ -679,6 +680,7 @@ static void print_buffer_ex(const unsigned char * data, size_t len) {
     }
     fprintf(stderr, "\n");
 }
+#endif
 
 static IEEE1609_CERT * IEEE1609_CERT_new_from_buffer(const unsigned char ** data, long len) {
     IEEE1609_CERT * cert = NULL;
@@ -1645,12 +1647,13 @@ int SSL_get_1609_cert_chain(SSL *s, const unsigned char *hashedid, ssl_1609_cert
     int ret = 0;
 
     //ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain ENTER");
-    if (info_size_in_bytes < sizeof(ssl_1609_cert_info_t)) {
+    if (info_size_in_bytes < (int)sizeof(ssl_1609_cert_info_t)) {
        ola(__FILE__,__LINE__,"ssl_get_1609_cert_chain buffer too small");
        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
        goto out;
     }
 
+    // the print_buffer_ex function is hidden behind "#if 0"
     //print_buffer_ex(hashedid, HASHEDID8_LEN);
     memset(info, 0, info_size_in_bytes);  // A little bit of redundant work is done here.
     memcpy(info->hashedid, hashedid, HASHEDID8_LEN);
@@ -1732,7 +1735,7 @@ int SSL_get_1609_cert_chain(SSL *s, const unsigned char *hashedid, ssl_1609_cert
           name_len = p[15];
           name = (const char*) p+16;
           //printf("id.name: %.*s\n", name_len, name);
-          if (name_len >= sizeof(info->id_name)-1) name_len = sizeof(info->id_name)-1;
+          if (name_len >= (int) sizeof(info->id_name)-1) name_len = sizeof(info->id_name)-1;
           strncpy(info->id_name, name, name_len);
           if (p[25+name_len] >= 0x81 && p[25+name_len] <= 0x86) {
              dur_type = p[25+name_len] & 0x0f;
@@ -1750,7 +1753,7 @@ int SSL_get_1609_cert_chain(SSL *s, const unsigned char *hashedid, ssl_1609_cert
           name_len = p[7];
           name = (const char*) p+8;
           //printf("id.name: %.*s\n", name_len, name);
-          if (name_len >= sizeof(info->id_name)-1) name_len = sizeof(info->id_name)-1;
+          if (name_len >= (int)sizeof(info->id_name)-1) name_len = sizeof(info->id_name)-1;
           strncpy(info->id_name, name, name_len);
           if (p[17+name_len] >= 0x81 && p[17+name_len] <= 0x86) {
              dur_type = p[17+name_len] & 0x0f;
